@@ -3,12 +3,15 @@ import pyautogui
 import numpy as np
 import sys
 import time
+from pathlib import Path
 
 pyautogui.FAILSAFE = True
 
 # Config
-UN_PATH = 'Basic_Fishing_UN.png'
-EQ_PATH = 'Basic_Fishing_EQ.png'
+# Templates live next to this detector in the Images/ folder
+IMAGES_DIR = Path(__file__).parent
+UN_PATH = IMAGES_DIR / 'Basic_Fishing_UN.png'
+EQ_PATH = IMAGES_DIR / 'Basic_Fishing_EQ.png'
 # Region to check: top-left and bottom-right (inclusive)
 TOP_LEFT = (725, 1004)
 BOTTOM_RIGHT = (1189, 1072)
@@ -17,10 +20,11 @@ debug = True       # set True to print info and save debug image
 
 
 def load_templates():
-    un_color = cv2.imread(UN_PATH)
-    eq_color = cv2.imread(EQ_PATH)
+    # Use absolute paths so imports from other folders find them reliably
+    un_color = cv2.imread(str(UN_PATH))
+    eq_color = cv2.imread(str(EQ_PATH))
     if un_color is None or eq_color is None:
-        print('Error: Could not load template images. Ensure Basic_Fishing_UN.png and Basic_Fishing_EQ.png are in this folder.')
+        print(f"Error: Could not load template images. Looking for:\n  {UN_PATH}\n  {EQ_PATH}")
         sys.exit(1)
     return cv2.cvtColor(un_color, cv2.COLOR_BGR2GRAY), cv2.cvtColor(eq_color, cv2.COLOR_BGR2GRAY)
 
