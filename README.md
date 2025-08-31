@@ -4,7 +4,10 @@ Welcome to my macro! We call it a fishing macro, but it can be used for way more
 
 ## Features
 
-- **Auto Bone Grinding**: Currently works with Elemental fruits. Make sure you stand at the position shown in `\Images\Bones_ReadMe.png`.
+- **Auto Bone Grinding**: Currently works with Elemental fruits. Make sure you stand at the position shown below — click the image to view full size.
+
+[![Bones ReadMe](Images/Bones_ReadMe.png)](Images/Bones_ReadMe.png)
+
 - **Auto Fishing**: Working on a nice GUI and additional features.
 - **Auto Webhook**: This will be useful for notifications and updates.
 
