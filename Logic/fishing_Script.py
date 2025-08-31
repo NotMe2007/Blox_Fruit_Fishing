@@ -74,6 +74,52 @@ def Zoom_Out(x, y, duration=0.011):
         pyautogui.press('0')
         time.sleep(duration)
 
+def Fish_On_Hook(x, y, duration=0.011):
+    """Detect the fish-on-hook indicator and click the current mouse position.
+
+    Returns True if a click was performed, False otherwise.
+    """
+    # if template not available, return False
+    if 'FISH_ON_HOOK_TPL' not in globals() or FISH_ON_HOOK_TPL is None:
+        return False
+
+    # search the full screen for the Fish_On_Hook template
+    screen_w, screen_h = pyautogui.size()
+    region = (0, 0, screen_w, screen_h)
+    found, score = _match_template_in_region(FISH_ON_HOOK_TPL, region, threshold=0.84)
+    if found:
+        # click current mouse position (no coordinates passed)
+        pyautogui.click()
+        # small pause to avoid double-detecting the same hook
+        time.sleep(duration)
+        return True
+    return False
+
+def Shift_State(x, y, duration=0.011):
+    """Simulate pressing 'shift' to change the fishing state. Presses occur every `duration` seconds.
+    x,y are kept for API compatibility but aren't used for key presses.
+    """
+    # check a 200x200 region centered on screen (100px around center)
+    screen_w, screen_h = pyautogui.size()
+    cx = screen_w // 2
+    cy = screen_h // 2
+    region = (max(0, cx - 100), max(0, cy - 100), min(200, screen_w), min(200, screen_h))
+
+    # require the Shift_Lock template to be present in Images/
+    if 'SHIFT_LOCK_TPL' not in globals() or SHIFT_LOCK_TPL is None:
+        # nothing to check; do nothing
+        return False
+
+    found, score = _match_template_in_region(SHIFT_LOCK_TPL, region, threshold=0.82)
+    if found:
+        pyautogui.keyDown('shift')
+        time.sleep(duration)
+        pyautogui.keyUp('shift')
+        return True
+    return False
+
+
+
 # --- power detection helpers -------------------------------------------------
 
 IMAGES_DIR = Path(__file__).resolve().parents[1] / 'Images'
@@ -82,10 +128,14 @@ POWER_ACTIVE_TPL = None
 try:
     POWER_MAX_TPL = cv2.imread(str(IMAGES_DIR / 'Power_Max.png'), cv2.IMREAD_GRAYSCALE)
     POWER_ACTIVE_TPL = cv2.imread(str(IMAGES_DIR / 'Power_Active.png'), cv2.IMREAD_GRAYSCALE)
+    FISH_ON_HOOK_TPL = cv2.imread(str(IMAGES_DIR / 'Fish_On_Hook.png'), cv2.IMREAD_GRAYSCALE)
+    SHIFT_LOCK_TPL = cv2.imread(str(IMAGES_DIR / 'Shift_Lock.png'), cv2.IMREAD_GRAYSCALE)
 except Exception:
-    # keep None if templates aren't available
-    POWER_MAX_TPL = POWER_MAX_TPL
-    POWER_ACTIVE_TPL = POWER_ACTIVE_TPL
+    # set templates to None if loading fails
+    POWER_MAX_TPL = None
+    POWER_ACTIVE_TPL = None
+    FISH_ON_HOOK_TPL = None
+    SHIFT_LOCK_TPL = None
 
 
 def _match_template_in_region(template, region, threshold=0.80):
