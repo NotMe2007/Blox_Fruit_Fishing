@@ -8,32 +8,35 @@ import importlib.util
 
 pyautogui.FAILSAFE = True
 
-# Load the detector module from Images/FishingRodDetector.py (robust import by path)
-# fishing_script.py lives in `Logic/` so Images/ is one level up from its parent.
-detector_path = Path(__file__).resolve().parents[1] / 'Images' / 'FishingRodDetector.py'
-if not detector_path.exists():
-    # fallback: maybe the detector sits at repo root as FishingRodDetector.py
-    alt = Path(__file__).resolve().parents[1] / 'FishingRodDetector.py'
-    if alt.exists():
-        detector_path = alt
-    else:
-        print('Error: detector file not found. Tried:', detector_path, 'and', alt)
-        sys.exit(1)
+def get_detector_module():
+    """Lazily load the FishingRodDetector module.
 
-spec = importlib.util.spec_from_file_location('frod', str(detector_path))
-if spec is None or spec.loader is None:
-    print('Error: failed to create import spec for:', detector_path)
-    sys.exit(1)
+    Returns the loaded module. Raises RuntimeError if the detector cannot be found
+    or loaded. This avoids printing or exiting during import-time of this module.
+    """
+    detector_path = Path(__file__).resolve().parents[1] / 'Images' / 'FishingRodDetector.py'
+    if not detector_path.exists():
+        alt = Path(__file__).resolve().parents[1] / 'FishingRodDetector.py'
+        if alt.exists():
+            detector_path = alt
+        else:
+            raise RuntimeError(f"detector file not found. Tried: {detector_path} and {alt}")
 
-frod = importlib.util.module_from_spec(spec)
-try:
-    spec.loader.exec_module(frod)
-except Exception as e:
-    print('Error: failed to load detector module:', e)
-    sys.exit(1)
+    spec = importlib.util.spec_from_file_location('frod', str(detector_path))
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"failed to create import spec for: {detector_path}")
+
+    module = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(module)
+    except Exception as e:
+        raise RuntimeError(f"failed to load detector module: {e}")
+
+    return module
 
 
 def screen_region_image():
+    frod = get_detector_module()
     left = max(0, frod.TOP_LEFT[0])
     top = max(0, frod.TOP_LEFT[1])
     right = max(left + 1, frod.BOTTOM_RIGHT[0])
@@ -79,14 +82,18 @@ def Fish_On_Hook(x, y, duration=0.011):
 
     Returns True if a click was performed, False otherwise.
     """
-    # if template not available, return False
-    if 'FISH_ON_HOOK_TPL' not in globals() or FISH_ON_HOOK_TPL is None:
+    # load detector templates lazily
+    try:
+        frod = get_detector_module()
+    except RuntimeError:
+        return False
+    if not hasattr(frod, 'FISH_ON_HOOK_TPL') or frod.FISH_ON_HOOK_TPL is None:
         return False
 
     # search the full screen for the Fish_On_Hook template
     screen_w, screen_h = pyautogui.size()
     region = (0, 0, screen_w, screen_h)
-    found, score = _match_template_in_region(FISH_ON_HOOK_TPL, region, threshold=0.84)
+    found, score = _match_template_in_region(frod.FISH_ON_HOOK_TPL, region, threshold=0.84)
     if found:
         # click current mouse position (no coordinates passed)
         pyautogui.click()
@@ -105,18 +112,23 @@ def Shift_State(x, y, duration=0.011):
     cy = screen_h // 2
     region = (max(0, cx - 100), max(0, cy - 100), min(200, screen_w), min(200, screen_h))
 
-    # require the Shift_Lock template to be present in Images/
-    if 'SHIFT_LOCK_TPL' not in globals() or SHIFT_LOCK_TPL is None:
-        # nothing to check; do nothing
+    try:
+        frod = get_detector_module()
+    except RuntimeError:
         return False
 
-    found, score = _match_template_in_region(SHIFT_LOCK_TPL, region, threshold=0.82)
+    # require the Shift_Lock template to be present in Images/
+    if not hasattr(frod, 'SHIFT_LOCK_TPL') or frod.SHIFT_LOCK_TPL is None:
+        return False
+
+    found, score = _match_template_in_region(frod.SHIFT_LOCK_TPL, region, threshold=0.82)
     if found:
         pyautogui.keyDown('shift')
         time.sleep(duration)
         pyautogui.keyUp('shift')
         return True
     return False
+
 
 
 
@@ -189,13 +201,22 @@ def Use_Ability_Fishing(x, y, duration=0.011):
     region = (1564, 769, 348, 76)
 
     # check if an active particle state is present (use lower threshold)
-    active_found, active_score = _match_template_in_region(POWER_ACTIVE_TPL, region, threshold=0.6)
+    # load templates from Images/ lazily
+    try:
+        frod = get_detector_module()
+    except RuntimeError:
+        # cannot find templates; nothing to do
+        return
+
+    active_tpl = getattr(frod, 'POWER_ACTIVE_TPL', None) or POWER_ACTIVE_TPL
+    power_max_tpl = getattr(frod, 'POWER_MAX_TPL', None) or POWER_MAX_TPL
+    active_found, active_score = _match_template_in_region(active_tpl, region, threshold=0.6)
     if active_found:
         # power is currently being used; skip clicking
         return
 
     # check for exact full template
-    full_found, full_score = _match_template_in_region(POWER_MAX_TPL, region, threshold=0.84)
+    full_found, full_score = _match_template_in_region(power_max_tpl, region, threshold=0.84)
     if full_found:
         # power is full: press the activation key (Z)
         pyautogui.press('z')
@@ -210,4 +231,3 @@ def Use_Ability_Fishing(x, y, duration=0.011):
         time.sleep(0.05)
 
 # --- power detection helpers and defined fishing ------------------------------------^^^^
-
