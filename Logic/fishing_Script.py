@@ -80,20 +80,27 @@ def Zoom_Out(x, y, duration=0.011):
 def Fish_On_Hook(x, y, duration=0.011):
     """Detect the fish-on-hook indicator and click the current mouse position.
 
-    Returns True if a click was performed, False otherwise.
+    Detects whether the fish indicator corresponds to a left- or right-moving
+    fish by matching against `Fish_Left.png` and `Fish_Right.png`.
+
+    Returns the direction string 'left' or 'right' when a click was performed,
+    or None when nothing was detected. (Previous callers expecting a boolean
+    should treat non-None as True.)
     """
     # load detector templates lazily
     try:
         frod = get_detector_module()
     except RuntimeError:
         return False
-    if not hasattr(frod, 'FISH_ON_HOOK_TPL') or frod.FISH_ON_HOOK_TPL is None:
+    # prefer detector-provided generic template, fall back to module-level one
+    generic_tpl = getattr(frod, 'FISH_ON_HOOK_TPL', None) or globals().get('FISH_ON_HOOK_TPL')
+    if generic_tpl is None:
         return False
 
     # search the full screen for the Fish_On_Hook template
     screen_w, screen_h = pyautogui.size()
     region = (0, 0, screen_w, screen_h)
-    found, score = _match_template_in_region(frod.FISH_ON_HOOK_TPL, region, threshold=0.84)
+    found, score = _match_template_in_region(generic_tpl, region, threshold=0.84)
     if found:
         # click current mouse position (no coordinates passed)
         pyautogui.click()
@@ -101,6 +108,7 @@ def Fish_On_Hook(x, y, duration=0.011):
         time.sleep(duration)
         return True
     return False
+
 
 def Shift_State(x, y, duration=0.011):
     """Simulate pressing 'shift' to change the fishing state. Presses occur every `duration` seconds.
@@ -141,12 +149,16 @@ try:
     POWER_MAX_TPL = cv2.imread(str(IMAGES_DIR / 'Power_Max.png'), cv2.IMREAD_GRAYSCALE)
     POWER_ACTIVE_TPL = cv2.imread(str(IMAGES_DIR / 'Power_Active.png'), cv2.IMREAD_GRAYSCALE)
     FISH_ON_HOOK_TPL = cv2.imread(str(IMAGES_DIR / 'Fish_On_Hook.png'), cv2.IMREAD_GRAYSCALE)
+    FISH_LEFT_TPL = cv2.imread(str(IMAGES_DIR / 'Fish_Left.png'), cv2.IMREAD_GRAYSCALE)
+    FISH_RIGHT_TPL = cv2.imread(str(IMAGES_DIR / 'Fish_Right.png'), cv2.IMREAD_GRAYSCALE)
     SHIFT_LOCK_TPL = cv2.imread(str(IMAGES_DIR / 'Shift_Lock.png'), cv2.IMREAD_GRAYSCALE)
 except Exception:
     # set templates to None if loading fails
     POWER_MAX_TPL = None
     POWER_ACTIVE_TPL = None
     FISH_ON_HOOK_TPL = None
+    FISH_LEFT_TPL = None
+    FISH_RIGHT_TPL = None
     SHIFT_LOCK_TPL = None
 
 
@@ -186,6 +198,63 @@ def _estimate_bar_fill(region, brightness_thresh=110):
     filled = np.count_nonzero(row_mean > brightness_thresh)
     total = row_mean.shape[0]
     return float(filled) / float(total) if total > 0 else 0.0
+
+
+def _detect_fish_direction(region=None, threshold=0.84):
+    """Return 'left' or 'right' if matching Fish_Left or Fish_Right templates in region.
+    If region is None, search the full screen. Returns None when no match.
+    """
+    if region is None:
+        screen_w, screen_h = pyautogui.size()
+        region = (0, 0, screen_w, screen_h)
+
+    # prefer detector-provided templates if available
+    try:
+        frod = get_detector_module()
+        left_tpl = getattr(frod, 'FISH_LEFT_TPL', None)
+        right_tpl = getattr(frod, 'FISH_RIGHT_TPL', None)
+    except RuntimeError:
+        left_tpl = None
+        right_tpl = None
+
+    left_tpl = left_tpl or globals().get('FISH_LEFT_TPL')
+    right_tpl = right_tpl or globals().get('FISH_RIGHT_TPL')
+
+    if left_tpl is None and right_tpl is None:
+        return None
+
+    left_found, left_score = _match_template_in_region(left_tpl, region, threshold=threshold) if left_tpl is not None else (False, 0.0)
+    right_found, right_score = _match_template_in_region(right_tpl, region, threshold=threshold) if right_tpl is not None else (False, 0.0)
+
+    # pick the higher score if both matched
+    if left_found and right_found:
+        return 'left' if left_score >= right_score else 'right'
+    if left_found:
+        return 'left'
+    if right_found:
+        return 'right'
+    return None
+
+
+def Fish_Left(x, y, duration=0.011):
+    """Detect left-moving fish using Fish_Left template. Returns True when detected and clicks."""
+    # search a reasonable region (full screen for now)
+    direction = _detect_fish_direction(region=None, threshold=0.84)
+    if direction == 'left':
+        pyautogui.click()
+        time.sleep(duration)
+        return True
+    return False
+
+
+def Fish_Right(x, y, duration=0.011):
+    """Detect right-moving fish using Fish_Right template. Returns True when detected and clicks."""
+    direction = _detect_fish_direction(region=None, threshold=0.84)
+    if direction == 'right':
+        pyautogui.click()
+        time.sleep(duration)
+        return True
+    return False
 
 
 def Use_Ability_Fishing(x, y, duration=0.011):
