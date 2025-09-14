@@ -31,7 +31,7 @@ def test_api_functionality():
          
         # Test game search
         print("\nTesting game search...")
-        search_result = checker.search_game_by_name("Blox Fruits")
+        search_result = checker.search_game_by_name("Blox Fruits") #
         
         if search_result:
             print(f"✅ Search result: {search_result.get('name', 'Unknown')}")

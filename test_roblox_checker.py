@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Test script to demonstrate the Roblox checker functionality.
-This script will continuously check for Roblox and Blox Fruits status.
+This script will continuously check for Roblox and Blox Fruits status. 
 """
 
 import time
@@ -13,7 +13,7 @@ def main():
     print("This script will check every 5 seconds for Roblox and Blox Fruits status.")
     print("Press Ctrl+C to exit.\n")
     
-    checker = RobloxChecker()
+    checker = RobloxChecker() #
     
     try:
         while True:
