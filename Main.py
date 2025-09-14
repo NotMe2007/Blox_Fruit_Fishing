@@ -167,9 +167,8 @@ class LauncherApp(_BaseLauncher):
                     
                     threading.Thread(target=self._wait_for_blox_fruits, daemon=True).start()
                 return
-            else:
-                # Show success message briefly
-                messagebox.showinfo("Ready to Start", roblox_status['message'])
+            # If can_proceed is True, just continue to start the script automatically
+            # No success message needed - just start the fishing
         except Exception as e:
             messagebox.showerror("Roblox Check Error", f"Failed to check Roblox status: {str(e)}")
             return
