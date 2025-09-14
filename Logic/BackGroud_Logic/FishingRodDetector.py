@@ -8,15 +8,15 @@ from pathlib import Path
 pyautogui.FAILSAFE = True
 
 # Config
-# Templates live next to this detector in the Images/ folder
-IMAGES_DIR = Path(__file__).parent
+# Templates live in the Images/ folder relative to the project root
+IMAGES_DIR = Path(__file__).parent.parent.parent / 'Images'
 UN_PATH = IMAGES_DIR / 'Basic_Fishing_UN.png'
 EQ_PATH = IMAGES_DIR / 'Basic_Fishing_EQ.png'
 # Region to check: top-left and bottom-right (inclusive)
 TOP_LEFT = (725, 1004)
 BOTTOM_RIGHT = (1189, 1072)
 threshold = 0.55   # matching threshold (0-1). Lower to be more permissive
-debug = True       # set True to print info and save debug image
+debug = False      # set True to print info and save debug image
 
 
 def load_templates():
@@ -96,23 +96,44 @@ def multi_scale_match(screenshot_gray, template_gray, scales=None):
 
 
 def check_region_and_act():
-    un_gray, eq_gray = load_templates()
+    """
+    Check the fishing rod region and take appropriate action.
+    
+    Returns:
+        True: UN (unequipped) rod detected and clicked
+        False: EQ (equipped) rod detected - ready to fish
+        None: No clear detection
+    """
+    try:
+        un_gray, eq_gray = load_templates()
+    except Exception as e:
+        print(f"Error loading templates: {e}")
+        return None
 
-    left = max(0, TOP_LEFT[0])
-    top = max(0, TOP_LEFT[1])
-    right = max(left + 1, BOTTOM_RIGHT[0])
-    bottom = max(top + 1, BOTTOM_RIGHT[1])
-    w = right - left
-    h = bottom - top
-    region = (left, top, w, h)
+    try:
+        left = max(0, TOP_LEFT[0])
+        top = max(0, TOP_LEFT[1])
+        screen_w, screen_h = pyautogui.size()
+        right = min(screen_w, BOTTOM_RIGHT[0])
+        bottom = min(screen_h, BOTTOM_RIGHT[1])
+        w = max(1, right - left)
+        h = max(1, bottom - top)
+        region = (left, top, w, h)
 
-    time.sleep(0.05)
-    pil_img = pyautogui.screenshot(region=region)
-    screenshot = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
-    screenshot_gray = cv2.cvtColor(screenshot, cv2.COLOR_BGR2GRAY)
+        time.sleep(0.05)
+        pil_img = pyautogui.screenshot(region=region)
+        screenshot = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+        screenshot_gray = cv2.cvtColor(screenshot, cv2.COLOR_BGR2GRAY)
+    except Exception as e:
+        print(f"Error capturing screenshot: {e}")
+        return None
 
-    best_un_val, best_un_loc, best_un_scale, best_un_size = multi_scale_match(screenshot_gray, un_gray)
-    best_eq_val, best_eq_loc, best_eq_scale, best_eq_size = multi_scale_match(screenshot_gray, eq_gray)
+    try:
+        best_un_val, best_un_loc, best_un_scale, best_un_size = multi_scale_match(screenshot_gray, un_gray)
+        best_eq_val, best_eq_loc, best_eq_scale, best_eq_size = multi_scale_match(screenshot_gray, eq_gray)
+    except Exception as e:
+        print(f"Error in template matching: {e}")
+        return None
 
     if debug:
         print(f"Region ({left},{top})-({right},{bottom}) -> UN:{best_un_val:.3f} (scale={best_un_scale}) EQ:{best_eq_val:.3f} (scale={best_eq_scale})")
@@ -146,6 +167,24 @@ def check_region_and_act():
 
     print('No UN or EQ detected in the region')
     return None
+
+
+# Load templates that are expected by Fishing_Script.py
+try:
+    FISH_ON_HOOK_TPL = cv2.imread(str(IMAGES_DIR / 'Fish_On_Hook.png'), cv2.IMREAD_GRAYSCALE)
+    FISH_LEFT_TPL = cv2.imread(str(IMAGES_DIR / 'Fish_Left.png'), cv2.IMREAD_GRAYSCALE)
+    FISH_RIGHT_TPL = cv2.imread(str(IMAGES_DIR / 'Fish_Right.png'), cv2.IMREAD_GRAYSCALE)
+    SHIFT_LOCK_TPL = cv2.imread(str(IMAGES_DIR / 'Shift_Lock.png'), cv2.IMREAD_GRAYSCALE)
+    POWER_MAX_TPL = cv2.imread(str(IMAGES_DIR / 'Power_Max.png'), cv2.IMREAD_GRAYSCALE)
+    POWER_ACTIVE_TPL = cv2.imread(str(IMAGES_DIR / 'Power_Active.png'), cv2.IMREAD_GRAYSCALE)
+except Exception as e:
+    print(f"Warning: Could not load some template images: {e}")
+    FISH_ON_HOOK_TPL = None
+    FISH_LEFT_TPL = None
+    FISH_RIGHT_TPL = None
+    SHIFT_LOCK_TPL = None
+    POWER_MAX_TPL = None
+    POWER_ACTIVE_TPL = None
 
 
 if __name__ == '__main__':

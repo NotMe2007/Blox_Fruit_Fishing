@@ -3,3 +3,6 @@ pillow>=11.1.0
 numpy
 opencv-python
 pyautogui
+psutil
+pywin32
+requests

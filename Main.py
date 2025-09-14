@@ -10,6 +10,9 @@ try:
 except Exception:
     ctk = None
 
+# Import the Roblox checker
+from Logic.IsRoblox_Open import check_roblox_and_game
+
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SCRIPT_PATH = os.path.join(BASE_DIR, "Logic", "Fishing_Script.py")
@@ -47,6 +50,11 @@ class LauncherApp(_BaseLauncher):
         y = (screen_h // 2) - (height // 2)
         self.geometry(f"{width}x{height}+{x}+{y}")
         self.resizable(False, False)
+        
+        # Make window stay on top
+        self.attributes('-topmost', True)
+        self.focus_force()  # Force focus to the window
+        self.topmost_enabled = True
 
         self.process = None
 
@@ -80,6 +88,20 @@ class LauncherApp(_BaseLauncher):
         self.btn.pack(pady=(0, 12))
 
 
+        # Add topmost toggle button
+        self.topmost_btn = ctk.CTkButton(
+            container,
+            text="📌 Always on Top: ON",
+            width=200,
+            height=25,
+            corner_radius=8,
+            fg_color="#444444",
+            hover_color="#555555",
+            font=ctk.CTkFont(size=11),
+            command=self.toggle_topmost,
+        )
+        self.topmost_btn.pack(pady=(6, 6))
+
         hint = ctk.CTkLabel(container, text="Tip: Keep the game window open. Click again to stop the script.")
         hint.pack(side="bottom", pady=(6, 12))
 
@@ -96,8 +118,26 @@ class LauncherApp(_BaseLauncher):
 
         self.btn = tk.Button(frame, text="Auto Fishing", width=30, height=2, command=self.on_start)
         self.btn.pack(pady=(0, 8))
+        
+        # Add topmost toggle button for basic UI
+        self.topmost_btn = tk.Button(frame, text="📌 Always on Top: ON", width=25, height=1, command=self.toggle_topmost)
+        self.topmost_btn.pack(pady=(4, 4))
 
     # status label intentionally removed per user request
+
+    def toggle_topmost(self):
+        """Toggle the always-on-top behavior of the window."""
+        self.topmost_enabled = not self.topmost_enabled
+        self.attributes('-topmost', self.topmost_enabled)
+        
+        # Update button text
+        status_text = "ON" if self.topmost_enabled else "OFF"
+        button_text = f"📌 Always on Top: {status_text}"
+        
+        if ctk and hasattr(self.topmost_btn, 'configure'):
+            self.topmost_btn.configure(text=button_text)
+        elif hasattr(self.topmost_btn, 'config'):
+            self.topmost_btn.config(text=button_text)
 
     def on_start(self):
         if not resource_exists(SCRIPT_PATH):
@@ -107,6 +147,31 @@ class LauncherApp(_BaseLauncher):
         if self.process and self.process.poll() is None:
             # process is running -> stop it
             self._stop_process()
+            return
+
+        # Check Roblox status before starting
+        try:
+            roblox_status = check_roblox_and_game()
+            
+            if not roblox_status['can_proceed']:
+                # Ask user if they want to wait for Roblox/Blox Fruits
+                retry_msg = f"{roblox_status['message']}\n\nWould you like to wait and retry automatically?"
+                retry = messagebox.askyesno("Roblox Check Failed", retry_msg)
+                
+                if retry:
+                    # Disable button and wait for Roblox/Blox Fruits
+                    if ctk:
+                        self.btn.configure(state="disabled", text="Waiting for Blox Fruits...")
+                    else:
+                        self.btn.configure(state="disabled", text="Waiting for Blox Fruits...")
+                    
+                    threading.Thread(target=self._wait_for_blox_fruits, daemon=True).start()
+                return
+            else:
+                # Show success message briefly
+                messagebox.showinfo("Ready to Start", roblox_status['message'])
+        except Exception as e:
+            messagebox.showerror("Roblox Check Error", f"Failed to check Roblox status: {str(e)}")
             return
 
         # disable button and start
@@ -147,6 +212,33 @@ class LauncherApp(_BaseLauncher):
         except Exception as e:
             messagebox.showerror("Launch failed", str(e))
             # error occurred (no status widget)
+            if ctk:
+                self.btn.configure(state="normal", text="Auto Fishing")
+            else:
+                self.btn.configure(state="normal", text="Auto Fishing")
+
+    def _wait_for_blox_fruits(self):
+        """Wait for user to open Blox Fruits, then automatically start the script."""
+        from Logic.IsRoblox_Open import RobloxChecker
+        
+        try:
+            checker = RobloxChecker()
+            # Wait up to 60 seconds for Blox Fruits
+            if checker.wait_for_blox_fruits(timeout=60):
+                # Blox Fruits detected, start the script
+                messagebox.showinfo("Success", "Blox Fruits detected! Starting the fishing script...")
+                threading.Thread(target=self._launch_script, daemon=True).start()
+            else:
+                # Timeout reached
+                messagebox.showwarning("Timeout", "Timeout reached. Please open Blox Fruits and try again.")
+                # Re-enable button
+                if ctk:
+                    self.btn.configure(state="normal", text="Auto Fishing")
+                else:
+                    self.btn.configure(state="normal", text="Auto Fishing")
+        except Exception as e:
+            messagebox.showerror("Error", f"Error while waiting for Blox Fruits: {str(e)}")
+            # Re-enable button
             if ctk:
                 self.btn.configure(state="normal", text="Auto Fishing")
             else:

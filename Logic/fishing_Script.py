@@ -14,13 +14,18 @@ def get_detector_module():
     Returns the loaded module. Raises RuntimeError if the detector cannot be found
     or loaded. This avoids printing or exiting during import-time of this module.
     """
-    detector_path = Path(__file__).resolve().parents[1] / 'Images' / 'FishingRodDetector.py'
+    detector_path = Path(__file__).resolve().parent / 'BackGroud_Logic' / 'FishingRodDetector.py'
     if not detector_path.exists():
-        alt = Path(__file__).resolve().parents[1] / 'FishingRodDetector.py'
+        # Try alternative locations
+        alt = Path(__file__).resolve().parents[1] / 'Images' / 'FishingRodDetector.py'
         if alt.exists():
             detector_path = alt
         else:
-            raise RuntimeError(f"detector file not found. Tried: {detector_path} and {alt}")
+            alt2 = Path(__file__).resolve().parents[1] / 'FishingRodDetector.py'
+            if alt2.exists():
+                detector_path = alt2
+            else:
+                raise RuntimeError(f"detector file not found. Tried: {detector_path}, {alt}, and {alt2}")
 
     spec = importlib.util.spec_from_file_location('frod', str(detector_path))
     if spec is None or spec.loader is None:
@@ -300,3 +305,140 @@ def Use_Ability_Fishing(x, y, duration=0.011):
         time.sleep(0.05)
 
 # --- power detection helpers and defined fishing ------------------------------------^^^^
+
+
+def handle_fishing_minigame(minigame_controller):
+    """
+    Handle the fishing minigame by detecting the UI and making decisions.
+    
+    Returns True when minigame is complete, False to continue.
+    """
+    # This is a simplified minigame handler
+    # In a full implementation, you would:
+    # 1. Detect the minigame UI elements
+    # 2. Read the indicator position and arrow direction
+    # 3. Use the minigame_controller to decide actions
+    # 4. Execute the recommended actions (key presses)
+    
+    # For now, simulate basic minigame interaction
+    # This should be replaced with actual UI detection and control
+    time.sleep(0.1)  # Brief pause for minigame processing
+    return False  # Continue minigame (return True when complete)
+
+
+def main_fishing_loop():
+    """Main fishing automation loop."""
+    print("Starting Blox Fruits Auto Fishing...")
+    print("Press Ctrl+C to stop the script.")
+    
+    # Import the rod detector and minigame logic
+    try:
+        from BackGroud_Logic.FishingRodDetector import check_region_and_act
+        from BackGroud_Logic.Fishing_MiniGame import MinigameController, MinigameConfig
+    except ImportError as e:
+        print(f"Failed to import required modules: {e}")
+        return
+    
+    # Initialize minigame controller
+    minigame_config = MinigameConfig()
+    minigame_controller = MinigameController(minigame_config)
+    
+    # Fishing state variables
+    fishing_state = "waiting"  # "waiting", "casting", "hooking", "minigame", "reeling"
+    cast_attempts = 0
+    max_cast_attempts = 3
+    minigame_start_time = 0
+    
+    try:
+        while True:
+            # Check for fishing rod state
+            rod_result = check_region_and_act()
+            
+            if rod_result is True:  # UN (unequipped) detected and clicked
+                fishing_state = "casting"
+                cast_attempts = 0
+                print("Fishing rod equipped, starting fishing cycle...")
+                
+            elif rod_result is False:  # EQ (equipped) detected - rod is ready
+                if fishing_state == "waiting":
+                    fishing_state = "casting"
+                    cast_attempts = 0
+                    
+            elif rod_result is None:  # No clear detection or error
+                # Continue with current state but add small delay
+                time.sleep(0.2)
+                
+            if fishing_state == "casting":
+                print(f"Casting fishing rod (attempt {cast_attempts + 1}/{max_cast_attempts})...")
+                
+                # Zoom in for better accuracy
+                screen_w, screen_h = pyautogui.size()
+                Zoom_In(screen_w // 2, screen_h // 2)
+                time.sleep(0.5)
+                
+                # Cast the rod
+                CastFishingRod(screen_w // 2, screen_h // 2 - 20)
+                time.sleep(2)  # Wait for cast to complete
+                
+                fishing_state = "hooking"
+                cast_attempts += 1
+                
+            elif fishing_state == "hooking":
+                print("Waiting for fish to bite...")
+                
+                # Check for fish on hook
+                hook_result = Fish_On_Hook(0, 0)  # Coordinates not used in current implementation
+                
+                if hook_result:
+                    print("Fish detected! Starting minigame...")
+                    fishing_state = "minigame"
+                    minigame_start_time = time.time()
+                
+                # Use fishing ability if available
+                Use_Ability_Fishing(0, 0)
+                
+                # Check shift state
+                Shift_State(0, 0)
+                
+                # Timeout after 30 seconds of waiting
+                if cast_attempts >= max_cast_attempts:
+                    print("Max cast attempts reached, resetting...")
+                    fishing_state = "waiting"
+                    cast_attempts = 0
+                    # Zoom out
+                    screen_w, screen_h = pyautogui.size()
+                    Zoom_Out(screen_w // 2, screen_h // 2)
+                
+            elif fishing_state == "minigame":
+                # Handle the fishing minigame
+                minigame_result = handle_fishing_minigame(minigame_controller)
+                
+                if minigame_result or (time.time() - minigame_start_time) > 15:  # 15 second timeout
+                    print("Fishing cycle complete, resetting...")
+                    fishing_state = "waiting"
+                    cast_attempts = 0
+                    
+                    # Zoom out after fishing
+                    screen_w, screen_h = pyautogui.size()
+                    Zoom_Out(screen_w // 2, screen_h // 2)
+                    time.sleep(1)  # Brief pause before next cycle
+                
+            # Small delay between iterations
+            time.sleep(0.1)
+            
+    except KeyboardInterrupt:
+        print("\nStopping auto fishing...")
+    except Exception as e:
+        print(f"Error in fishing loop: {e}")
+    finally:
+        # Zoom out when exiting
+        try:
+            screen_w, screen_h = pyautogui.size()
+            Zoom_Out(screen_w // 2, screen_h // 2)
+        except:
+            pass
+        print("Auto fishing stopped.")
+
+
+if __name__ == "__main__":
+    main_fishing_loop()
