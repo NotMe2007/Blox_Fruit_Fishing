@@ -5,7 +5,7 @@ Integration test for the Blox Fruits Fishing automation system.
 This script tests the integration between:
 - Fishing_Script.py (main automation logic)
 - FishingRodDetector.py (fishing rod state detection)
-- Fishing_MiniGame.py (minigame decision logic)
+- Fishing_MiniGame.py (minigame decision logic )
 
 Usage:
     python test_integration.py [--debug] [--dry-run]
@@ -14,7 +14,7 @@ Usage:
     --dry-run: Test without actually clicking or pressing keys
 """
 
-import sys
+import sys #
 import time
 import argparse
 from pathlib import Path
@@ -24,9 +24,9 @@ sys.path.insert(0, str(Path(__file__).parent / 'Logic'))
 
 def test_detector_module():
     """Test that the FishingRodDetector module can be loaded and used."""
-    print("Testing FishingRodDetector module...")
+    print("Testing FishingRodDetector module...")#
     
-    try:
+    try:#
         from Logic.BackGroud_Logic.FishingRodDetector import check_region_and_act, load_templates
         print("✅ FishingRodDetector module imported successfully")
         

@@ -30,12 +30,12 @@ def test_api_functionality():
             print("⚠️  Could not retrieve game info (may be network issue)")
          
         # Test game search
-        print("\nTesting game search...")
+        print("\nTesting game search...")#
         search_result = checker.search_game_by_name("Blox Fruits") #
         
         if search_result:
             print(f"✅ Search result: {search_result.get('name', 'Unknown')}")
-        else:
+        else:#
             print("⚠️  Could not search games (may be network issue)")
         
         # Test comprehensive status check

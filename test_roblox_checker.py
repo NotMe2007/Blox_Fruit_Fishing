@@ -29,7 +29,7 @@ def main():
             print(f"🚀 Can proceed: {'✅ Yes' if status['can_proceed'] else '❌ No'}")
             print(f"💬 Message: {status['message']}")
             print("-" * 50)
-            
+            #
             if status['can_proceed']:
                 print("🎉 Ready to start fishing! Exiting test...")
                 break
