@@ -4,5 +4,5 @@ numpy
 opencv-python
 pyautogui
 psutil
-pywin32
+pywin32; platform_system == "Windows"
 requests
