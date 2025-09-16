@@ -5,3 +5,4 @@ test_api_updates.py
 test_roblox_checker.py
 test_integration.py
 test_api_updates.py
+.github/copilot-instructions.md

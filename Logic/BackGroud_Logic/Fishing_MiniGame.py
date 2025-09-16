@@ -40,31 +40,52 @@ from typing import Optional, Tuple, Dict
 
 @dataclass
 class MinigameConfig:
+    # Control stat from fishing rod (affects max duration calculations)
+    control: float = 0.0  # 0.15-0.25+ based on rod stats
+    
+    # Color detection tolerances (from AHK script)
+    fish_bar_color_tolerance: int = 5  # Brown fish color detection
+    white_bar_color_tolerance: int = 15  # White bar detection
+    arrow_color_tolerance: int = 6  # Arrow/indicator detection
+    
     # Tolerances (normalized units)
     fish_bar_half_width: float = 0.08  # half-width of the fish bar (so full width = 2*half)
     white_bar_half_width: float = 0.02
 
-    # Scanning delay (used by callers, returned for reference)
-    scan_delay: float = 0.02
+    # Scanning delay (used by callers, returned for reference) - from AHK: 10ms
+    scan_delay: float = 0.01  # 10ms converted to seconds
+    
+    # Dynamic fish center position (can be updated during minigame)
+    fish_center: float = 0.5  # Default to center, updated by detection
 
-    # Side bar ratio (how far from center the side zones are) - not used directly
-    side_bar_ratio: float = 0.5
-    side_delay: float = 0.02
+    # Side bar ratio and delay (from AHK script)
+    side_bar_ratio: float = 0.7  # AHK default
+    side_delay: float = 0.4  # 400ms converted to seconds
 
-    # Stabililty multipliers/divisions used to compute intensity
-    stable_right_multiplier: float = 1.0
-    stable_right_division: float = 1.0
-    stable_left_multiplier: float = 1.0
-    stable_left_division: float = 1.0
+    # Stability multipliers/divisions (from AHK script - exact values)
+    stable_right_multiplier: float = 2.36
+    stable_right_division: float = 1.55
+    stable_left_multiplier: float = 1.211
+    stable_left_division: float = 1.12
 
-    unstable_right_multiplier: float = 1.5
-    unstable_right_division: float = 1.0
-    unstable_left_multiplier: float = 1.5
+    # Unstable multipliers/divisions (from AHK script - exact values)
+    unstable_right_multiplier: float = 2.665
+    unstable_right_division: float = 1.5
+    unstable_left_multiplier: float = 2.19
     unstable_left_division: float = 1.0
 
-    # Ankle-break multipliers (intended for very quick counter-actions)
-    right_ankle_break_multiplier: float = 2.0
-    left_ankle_break_multiplier: float = 2.0
+    # Ankle-break multipliers (from AHK script - exact values)
+    right_ankle_break_multiplier: float = 0.75
+    left_ankle_break_multiplier: float = 0.45
+
+    # Pixel scaling and deadzone calculations (calculated dynamically)
+    pixel_scaling: float = 1.0  # will be calculated based on bar width
+    deadzone: float = 0.02  # small deadzone for stability (normalized)
+    deadzone2: float = 0.04  # larger deadzone for aggressive actions (normalized)
+    
+    # Boundary calculations (normalized, calculated dynamically)
+    max_left_bar: float = 0.15  # left boundary
+    max_right_bar: float = 0.85  # right boundary
 
     # Minimal action intensity and max clamp
     min_intensity: float = 0.05
@@ -81,8 +102,8 @@ class MinigameController:
         return max(0.0, min(1.0, v))
 
     def _compute_target(self) -> float:
-        # The fish bar is centered in the full bar; target is center (0.5)
-        return 0.5
+        # The fish bar position - can be dynamic based on fish detection
+        return self.cfg.fish_center
 
     def _inside_fish_bar(self, indicator: float) -> bool:
         target = self._compute_target()
@@ -92,67 +113,145 @@ class MinigameController:
     def decide(self, indicator: float, arrow: Optional[str] = None, stable: bool = True,
                delta_time: Optional[float] = None) -> Dict:
         """
-        Decide corrective action for one step of the minigame.
+        Decide corrective action based on AHK minigame logic with 6 action types.
+        
+        Action types (matching AHK script):
+        0 = stabilize (short click for minor correction)
+        1 = stable left tracking (moderate left movement with counter-strafe)
+        2 = stable right tracking (moderate right movement with counter-strafe)
+        3 = max left boundary (indicator is too far right, strong left correction)
+        4 = max right boundary (indicator is too far left, strong right correction)
+        5 = unstable left (aggressive left movement for unstable conditions)
+        6 = unstable right (aggressive right movement for unstable conditions)
 
-        indicator: normalized 0..1 position
-        arrow: 'left'|'right' or None
+        indicator: normalized 0..1 position (white bar position)
+        arrow: 'left'|'right' or None (game pushing direction)
         stable: whether minigame is currently in a stable state
-        delta_time: time since last decision (unused for now)
+        delta_time: time since last decision (for adaptive duration)
 
-        Returns a dict: {action, intensity, note}
+        Returns a dict: {action, intensity, note, action_type, duration_factor}
         """
         indicator = self._clamp01(indicator)
-        target = self._compute_target()
-        error = indicator - target  # positive -> right of center
-
-        # If already comfortably inside fish bar, do nothing
-        if self._inside_fish_bar(indicator):
-            return {"action": "none", "intensity": 0.0, "note": "inside fish bar"}
-
-        # Decide correction direction: move toward center
-        direction = "move_left" if error > 0 else "move_right"
-
-        # Determine multiplier/division depending on side and stable/unstable
-        if error > 0:  # indicator is on the right side -> move left
-            if stable:
-                mult = self.cfg.stable_left_multiplier
-                div = self.cfg.stable_left_division
-            else:
-                mult = self.cfg.unstable_left_multiplier
-                div = self.cfg.unstable_left_division
-        else:  # indicator is on the left side -> move right
-            if stable:
-                mult = self.cfg.stable_right_multiplier
-                div = self.cfg.stable_right_division
-            else:
-                mult = self.cfg.unstable_right_multiplier
-                div = self.cfg.unstable_right_division
-
-        # Base intensity proportional to distance from center normalized by max possible distance (0.5)
-        base_intensity = abs(error) / 0.5  # maps 0..0.5 -> 0..1
-
-        # Apply multiplier/division and clamp
-        intensity = base_intensity * (mult / max(div, 1e-6))
-
-        # If arrow indicates pushing in a particular direction, increase intensity
-        if arrow == "right" and direction == "move_left":
-            intensity *= 1.2
-        elif arrow == "left" and direction == "move_right":
-            intensity *= 1.2
-
-        # Apply ankle-break for extreme cases (indicator very close to edge)
-        edge_threshold = 0.9
-        if indicator > edge_threshold:
-            intensity *= self.cfg.right_ankle_break_multiplier
-        elif indicator < (1.0 - edge_threshold):
-            intensity *= self.cfg.left_ankle_break_multiplier
-
-        # Final clamps
-        intensity = max(self.cfg.min_intensity, intensity)
-        intensity = min(self.cfg.max_intensity, intensity)
-
-        note = f"error={error:.3f} stable={stable} arrow={arrow}"
-        return {"action": direction, "intensity": float(intensity), "note": note}
+        fish_center = self._compute_target()
+        
+        # Calculate direction from white bar to fish center
+        direction = indicator - fish_center  # positive = white bar is right of fish
+        distance_factor = abs(direction) / self.cfg.white_bar_half_width
+        
+        # Check boundary conditions (AHK Action 3 & 4) - based on indicator position
+        if indicator < self.cfg.max_left_bar:
+            # Indicator is at extreme left - force right movement  
+            return {
+                "action": "move_right", 
+                "intensity": 1.0, 
+                "note": "max_right_boundary",
+                "action_type": 4,
+                "duration_factor": self.cfg.side_delay
+            }
+        elif indicator > self.cfg.max_right_bar:
+            # Indicator is at extreme right - force left movement
+            return {
+                "action": "move_left", 
+                "intensity": 1.0, 
+                "note": "max_left_boundary", 
+                "action_type": 3,
+                "duration_factor": self.cfg.side_delay
+            }
+        
+        # Normal tracking logic based on deadzone thresholds
+        if abs(direction) <= self.cfg.deadzone:
+            # AHK Action 0: Stabilize - small correction
+            return {
+                "action": "stabilize",
+                "intensity": 0.1,
+                "note": "stabilizing",
+                "action_type": 0,
+                "duration_factor": 0.01  # Very short click
+            }
+            
+        elif self.cfg.deadzone < abs(direction) <= self.cfg.deadzone2:
+            # AHK Action 1 & 2: Stable tracking
+            if direction > 0:  # Move left (Action 1)
+                intensity = abs(direction) * self.cfg.stable_left_multiplier * self.cfg.pixel_scaling
+                adaptive_duration = 0.5 + 0.5 * (distance_factor ** 1.2)
+                if distance_factor < 0.2:
+                    adaptive_duration = 0.15 + 0.15 * distance_factor
+                
+                return {
+                    "action": "move_left",
+                    "intensity": min(intensity, self.cfg.max_intensity),
+                    "note": "stable_left_tracking",
+                    "action_type": 1,
+                    "duration_factor": adaptive_duration,
+                    "counter_strafe": adaptive_duration / self.cfg.stable_left_division
+                }
+            else:  # Move right (Action 2)
+                intensity = abs(direction) * self.cfg.stable_right_multiplier * self.cfg.pixel_scaling
+                adaptive_duration = 0.5 + 0.5 * (distance_factor ** 1.2)
+                if distance_factor < 0.2:
+                    adaptive_duration = 0.15 + 0.15 * distance_factor
+                    
+                return {
+                    "action": "move_right",
+                    "intensity": min(intensity, self.cfg.max_intensity),
+                    "note": "stable_right_tracking",
+                    "action_type": 2,
+                    "duration_factor": adaptive_duration,
+                    "counter_strafe": adaptive_duration / self.cfg.stable_right_division
+                }
+                
+        else:  # abs(direction) > deadzone2
+            # AHK Action 5 & 6: Unstable/aggressive tracking
+            if direction > 0:  # Move left aggressively (Action 5)
+                # Calculate max duration based on Control stat (AHK style)
+                min_duration = 0.01
+                # Use a base duration that scales with distance and control
+                base_duration = abs(direction) * 2.0  # Scale up for visible differences
+                if self.cfg.control >= 0.25:
+                    max_duration = base_duration * 0.75
+                elif self.cfg.control >= 0.2:
+                    max_duration = base_duration * 0.8
+                elif self.cfg.control >= 0.15:
+                    max_duration = base_duration * 0.88
+                else:
+                    max_duration = base_duration + (abs(direction) * 0.2)
+                
+                raw_duration = abs(direction) * self.cfg.unstable_left_multiplier * self.cfg.pixel_scaling
+                duration = max(min_duration, min(raw_duration, max_duration))
+                
+                return {
+                    "action": "move_left",
+                    "intensity": min(1.0, raw_duration),
+                    "note": "unstable_left_aggressive", 
+                    "action_type": 5,
+                    "duration_factor": duration,
+                    "counter_strafe": duration / self.cfg.unstable_left_division
+                }
+            else:  # Move right aggressively (Action 6)
+                # Calculate max duration based on Control stat (AHK style)
+                min_duration = 0.01
+                # Use a base duration that scales with distance and control
+                base_duration = abs(direction) * 2.0  # Scale up for visible differences
+                if self.cfg.control >= 0.25:
+                    max_duration = base_duration * 0.75
+                elif self.cfg.control >= 0.2:
+                    max_duration = base_duration * 0.8
+                elif self.cfg.control >= 0.15:
+                    max_duration = base_duration * 0.88
+                else:
+                    max_duration = base_duration + (abs(direction) * 0.2)
+                    
+                raw_duration = abs(direction) * self.cfg.unstable_right_multiplier * self.cfg.pixel_scaling
+                duration = max(min_duration, min(raw_duration, max_duration))
+                
+                return {
+                    "action": "move_right",
+                    "intensity": min(1.0, raw_duration),
+                    "note": "unstable_right_aggressive",
+                    "action_type": 6,
+                    "duration_factor": duration,
+                    "counter_strafe": duration / self.cfg.unstable_right_division
+                }
 
 
 # A simple step simulator to allow light unit testing or tuning

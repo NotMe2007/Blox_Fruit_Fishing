@@ -30,7 +30,7 @@ except ImportError as e:
 
 # Import window manager for proper Roblox window handling
 try:
-    from BackGroud_Logic.WindowManager import roblox_window_manager, get_roblox_coordinates, get_roblox_window_region, ensure_roblox_focused
+    from BackGroud_Logic.WindowManager import roblox_window_manager, get_roblox_coordinates, get_roblox_window_region, ensure_roblox_focused # type: ignore
     WINDOW_MANAGER_AVAILABLE = True
     print("✓ Window manager loaded for proper Roblox window detection!")
 except ImportError as e:
@@ -725,23 +725,408 @@ def Use_Ability_Fishing(x, y, duration=0.011):
 # --- power detection helpers and defined fishing ------------------------------------^^^^
 
 
+def detect_minigame_elements():
+    """
+    Detect minigame UI elements using image-based detection in specific region.
+    Minigame bar spawns at coordinates (489, 774) to (1413, 873).
+    
+    Returns dict with:
+    - indicator_pos: float 0.0-1.0 (normalized position of white indicator)
+    - fish_pos: float 0.0-1.0 (normalized position of fish)
+    - minigame_active: bool (whether minigame UI is detected)
+    """
+    try:
+        # Specific minigame bar coordinates (provided by user)
+        minigame_left = 489
+        minigame_top = 774
+        minigame_right = 1413
+        minigame_bottom = 873
+        minigame_width = minigame_right - minigame_left
+        minigame_height = minigame_bottom - minigame_top
+        
+        # Take screenshot of the specific minigame region only
+        minigame_region = (minigame_left, minigame_top, minigame_width, minigame_height)
+        screenshot = pyautogui.screenshot(region=minigame_region)
+        screenshot_np = np.array(screenshot)
+        
+        # Convert to BGR for OpenCV
+        screenshot_bgr = cv2.cvtColor(screenshot_np, cv2.COLOR_RGB2BGR)
+        
+        print(f"🎯 Scanning minigame region: {minigame_region} ({minigame_width}x{minigame_height})")
+        
+        # Detect fish position using image-based detection in the cropped region
+        fish_pos = detect_fish_position_image_based(screenshot_bgr)
+        
+        # Detect white indicator position using image-based detection
+        indicator_pos = detect_white_indicator_image_based(screenshot_bgr)
+        
+        # Check if minigame is active using template matching for the bar itself
+        minigame_active = detect_minigame_bar_presence(screenshot_bgr)
+        
+        # If elements detected but no bar, still consider active if we found elements
+        if not minigame_active and (fish_pos is not None or indicator_pos is not None):
+            minigame_active = True
+        
+        return {
+            "minigame_active": minigame_active,
+            "indicator_pos": indicator_pos if indicator_pos is not None else 0.5,
+            "fish_pos": fish_pos if fish_pos is not None else 0.5
+        }
+        
+    except Exception as e:
+        print(f"Error detecting minigame elements: {e}")
+        return {"minigame_active": False, "indicator_pos": 0.5, "fish_pos": 0.5}
+
+
+def detect_fish_position_image_based(screenshot_bgr):
+    """
+    Optimized image-based fish detection using template matching and color analysis.
+    Much faster than pixel scanning. Returns normalized position 0.0-1.0 or None if not found.
+    """
+    try:
+        # First check if we have fish templates available
+        fish_left_path = Path(__file__).parent.parent / "Images" / "Fish_Left.png"
+        fish_right_path = Path(__file__).parent.parent / "Images" / "Fish_Right.png"
+        
+        # Try template matching first (fastest method)
+        if fish_left_path.exists() and fish_right_path.exists():
+            fish_left_template = cv2.imread(str(fish_left_path))
+            fish_right_template = cv2.imread(str(fish_right_path))
+            
+            if fish_left_template is not None and fish_right_template is not None:
+                # Convert to grayscale for faster matching
+                gray_screenshot = cv2.cvtColor(screenshot_bgr, cv2.COLOR_BGR2GRAY)
+                gray_left = cv2.cvtColor(fish_left_template, cv2.COLOR_BGR2GRAY)
+                gray_right = cv2.cvtColor(fish_right_template, cv2.COLOR_BGR2GRAY)
+                
+                # Template matching with normalized correlation
+                result_left = cv2.matchTemplate(gray_screenshot, gray_left, cv2.TM_CCOEFF_NORMED)
+                result_right = cv2.matchTemplate(gray_screenshot, gray_right, cv2.TM_CCOEFF_NORMED)
+                
+                # Find best matches
+                _, max_val_left, _, max_loc_left = cv2.minMaxLoc(result_left)
+                _, max_val_right, _, max_loc_right = cv2.minMaxLoc(result_right)
+                
+                # Use the better match if confidence is high enough
+                confidence_threshold = 0.6  # Lower threshold for faster detection
+                if max_val_left > max_val_right and max_val_left > confidence_threshold:
+                    fish_x = max_loc_left[0] + gray_left.shape[1] // 2
+                    fish_pos = fish_x / screenshot_bgr.shape[1]
+                    return max(0.0, min(1.0, fish_pos))
+                elif max_val_right > confidence_threshold:
+                    fish_x = max_loc_right[0] + gray_right.shape[1] // 2
+                    fish_pos = fish_x / screenshot_bgr.shape[1]
+                    return max(0.0, min(1.0, fish_pos))
+        
+        # Fallback to optimized color detection if templates fail
+        return detect_fish_position_color_fallback(screenshot_bgr)
+        
+    except Exception as e:
+        print(f"Error in image-based fish detection: {e}")
+        return None
+
+def detect_fish_position_color_fallback(screenshot_bgr):
+    """
+    Fast color-based fish detection as fallback method.
+    """
+    try:
+        # Use optimized color detection with smaller search area
+        # Convert AHK hex color 0x5B4B43 to BGR (OpenCV uses BGR)
+        fish_color_bgr = np.array([67, 75, 91])
+        fish_tolerance = 8  # Slightly higher tolerance for speed
+        
+        # Create color range for fish detection  
+        lower_fish = fish_color_bgr - fish_tolerance
+        upper_fish = fish_color_bgr + fish_tolerance
+        lower_fish = np.clip(lower_fish, 0, 255)
+        upper_fish = np.clip(upper_fish, 0, 255)
+        
+        # Create mask and find contours
+        mask = cv2.inRange(screenshot_bgr, lower_fish, upper_fish)
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        if not contours:
+            return None
+            
+        # Find largest contour
+        largest_contour = max(contours, key=cv2.contourArea)
+        
+        # Skip very small contours (noise)
+        if cv2.contourArea(largest_contour) < 10:
+            return None
+            
+        # Calculate center
+        M = cv2.moments(largest_contour)
+        if M['m00'] == 0:
+            return None
+            
+        fish_x = int(M['m10'] / M['m00'])
+        fish_pos = fish_x / screenshot_bgr.shape[1]
+        return max(0.0, min(1.0, fish_pos))
+        
+    except Exception as e:
+        print(f"Error in color fallback fish detection: {e}")
+        return None
+
+
+def detect_white_indicator_image_based(screenshot_bgr):
+    """
+    Optimized image-based white indicator detection.
+    Uses morphological operations and contour filtering for fast, accurate detection.
+    Returns normalized position 0.0-1.0 or None if not found.
+    """
+    try:
+        # Convert to HSV for better white detection in varying lighting
+        hsv = cv2.cvtColor(screenshot_bgr, cv2.COLOR_BGR2HSV)
+        
+        # Define optimized white detection range in HSV
+        # More robust than RGB detection
+        lower_white = np.array([0, 0, 200])    # Low saturation, high value
+        upper_white = np.array([180, 30, 255])  # Any hue, low saturation, high value
+        
+        # Create mask for white regions
+        white_mask = cv2.inRange(hsv, lower_white, upper_white)
+        
+        # Apply morphological operations to clean up the mask (faster than large tolerance)
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        white_mask = cv2.morphologyEx(white_mask, cv2.MORPH_OPEN, kernel)
+        white_mask = cv2.morphologyEx(white_mask, cv2.MORPH_CLOSE, kernel)
+        
+        # Find contours
+        contours, _ = cv2.findContours(white_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        if not contours:
+            return None
+        
+        # Filter contours by size and aspect ratio (white indicator has specific characteristics)
+        valid_contours = []
+        for contour in contours:
+            area = cv2.contourArea(contour)
+            if area < 5:  # Skip tiny noise
+                continue
+                
+            # Get bounding rectangle
+            x, y, w, h = cv2.boundingRect(contour)
+            
+            # Filter by aspect ratio (white indicator is typically wider than tall)
+            aspect_ratio = w / max(h, 1)
+            if 0.5 <= aspect_ratio <= 10.0:  # Reasonable aspect ratio range
+                valid_contours.append((contour, area, x + w // 2))
+        
+        if not valid_contours:
+            return None
+            
+        # Get the largest valid contour (most likely the indicator)
+        best_contour = max(valid_contours, key=lambda x: x[1])
+        indicator_x = best_contour[2]  # Center x coordinate
+        
+        # Normalize to 0.0-1.0 based on screenshot width
+        indicator_pos = indicator_x / screenshot_bgr.shape[1]
+        return max(0.0, min(1.0, indicator_pos))
+        
+    except Exception as e:
+        print(f"Error in image-based white indicator detection: {e}")
+        return None
+
+def detect_minigame_bar_presence(screenshot_bgr):
+    """
+    Fast detection of minigame bar presence using edge detection and shape analysis.
+    Returns True if minigame bar is detected, False otherwise.
+    """
+    try:
+        # Convert to grayscale for edge detection
+        gray = cv2.cvtColor(screenshot_bgr, cv2.COLOR_BGR2GRAY)
+        
+        # Apply Gaussian blur to reduce noise
+        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+        
+        # Edge detection with optimized parameters
+        edges = cv2.Canny(blurred, 50, 150)
+        
+        # Look for horizontal lines (characteristic of minigame bar)
+        # Use HoughLinesP for faster line detection
+        lines = cv2.HoughLinesP(edges, 1, np.pi/180, threshold=50, minLineLength=100, maxLineGap=10)
+        
+        if lines is not None:
+            # Count horizontal lines (minigame bar has distinct horizontal edges)
+            horizontal_lines = 0
+            for line in lines:
+                x1, y1, x2, y2 = line[0]
+                # Check if line is roughly horizontal
+                angle = np.arctan2(abs(y2 - y1), abs(x2 - x1)) * 180 / np.pi
+                if angle < 15:  # Within 15 degrees of horizontal
+                    horizontal_lines += 1
+                    
+            # If we found multiple horizontal lines, likely a minigame bar
+            if horizontal_lines >= 2:
+                return True
+        
+        # Fallback: check for rectangular shapes (bar outline)
+        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        for contour in contours:
+            # Approximate contour to polygon
+            epsilon = 0.02 * cv2.arcLength(contour, True)
+            approx = cv2.approxPolyDP(contour, epsilon, True)
+            
+            # Check if it's roughly rectangular (4-6 vertices)
+            if len(approx) >= 4 and len(approx) <= 6:
+                area = cv2.contourArea(contour)
+                if area > 1000:  # Large enough to be a minigame bar
+                    return True
+        
+        return False
+        
+    except Exception as e:
+        print(f"Error detecting minigame bar presence: {e}")
+        return False
+
+
 def handle_fishing_minigame(minigame_controller):
     """
     Handle the fishing minigame by detecting the UI and making decisions.
     
     Returns True when minigame is complete, False to continue.
     """
-    # This is a simplified minigame handler
-    # In a full implementation, you would:
-    # 1. Detect the minigame UI elements
-    # 2. Read the indicator position and arrow direction
-    # 3. Use the minigame_controller to decide actions
-    # 4. Execute the recommended actions (key presses)
-    
-    # For now, simulate basic minigame interaction
-    # This should be replaced with actual UI detection and control
-    time.sleep(0.1)  # Brief pause for minigame processing
-    return False  # Continue minigame (return True when complete)
+    try:
+        # Detect minigame elements
+        elements = detect_minigame_elements()
+        
+        if not elements["minigame_active"]:
+            print("Minigame UI not detected, ending minigame...")
+            return True
+            
+        indicator_pos = elements["indicator_pos"]
+        fish_pos = elements["fish_pos"]
+        
+        print(f"🎯 Minigame: Indicator at {indicator_pos:.3f}, Fish at {fish_pos:.3f}")
+        
+        # Update the minigame controller target to fish position
+        # We need to modify the controller to use fish_pos instead of 0.5
+        minigame_controller.cfg.fish_center = fish_pos
+        
+        # Get decision from controller
+        decision = minigame_controller.decide(
+            indicator=indicator_pos,
+            arrow=None,  # We could detect arrow direction from UI later
+            stable=True  # We could detect stability from UI changes later
+        )
+        
+        action = decision["action"]
+        intensity = decision["intensity"]
+        
+        print(f"🤖 Decision: {action} (intensity: {intensity:.3f}) - {decision['note']}")
+        
+        # Execute the AHK-style minigame action
+        execute_minigame_action(decision)
+        
+        # Brief processing delay
+        time.sleep(0.05)
+        return False  # Continue minigame
+        
+    except Exception as e:
+        print(f"Error in minigame handler: {e}")
+        return True  # End minigame on error
+
+
+def execute_minigame_action(decision):
+    """
+    Execute AHK-style minigame actions with sophisticated timing and control.
+    Handles all 6 action types with proper duration, counter-strafe, and ankle break mechanics.
+    """
+    try:
+        # Get click position (center of Roblox window)
+        if not WINDOW_MANAGER_AVAILABLE:
+            return
+            
+        click_x, click_y = get_roblox_coordinates()
+        if click_x is None or click_y is None:
+            return
+            
+        action_type = decision.get("action_type", 0)
+        action = decision.get("action")
+        duration_factor = decision.get("duration_factor", 0.05)
+        counter_strafe = decision.get("counter_strafe", 0)
+        
+        print(f"🎮 Minigame Action {action_type}: {action} (duration: {duration_factor:.3f}s)")
+        
+        if action_type == 0:  # Stabilize - short click
+            if VIRTUAL_MOUSE_AVAILABLE and virtual_mouse is not None:
+                virtual_mouse.mouse_down(click_x, click_y, 'left')  # Left mouse down
+                time.sleep(0.01)  # 10ms click
+                virtual_mouse.mouse_up(click_x, click_y, 'left')    # Left mouse up
+                time.sleep(0.01)
+            else:
+                pyautogui.mouseDown(click_x, click_y, button='left')
+                time.sleep(0.01)
+                pyautogui.mouseUp(click_x, click_y, button='left')
+                time.sleep(0.01)
+                
+        elif action_type == 1:  # Stable left tracking
+            if VIRTUAL_MOUSE_AVAILABLE and virtual_mouse is not None:
+                virtual_mouse.mouse_up(click_x, click_y, 'left')    # Ensure mouse up first
+                time.sleep(duration_factor)      # Wait duration
+                virtual_mouse.mouse_down(click_x, click_y, 'left')  # Mouse down for counter-strafe
+                time.sleep(counter_strafe)       # Counter-strafe duration
+            else:
+                pyautogui.mouseUp(click_x, click_y, button='left')
+                time.sleep(duration_factor)
+                pyautogui.mouseDown(click_x, click_y, button='left')
+                time.sleep(counter_strafe)
+                
+        elif action_type == 2:  # Stable right tracking  
+            if VIRTUAL_MOUSE_AVAILABLE and virtual_mouse is not None:
+                virtual_mouse.mouse_down(click_x, click_y, 'left')  # Mouse down first
+                time.sleep(duration_factor)      # Wait duration
+                virtual_mouse.mouse_up(click_x, click_y, 'left')    # Mouse up for counter-strafe
+                time.sleep(counter_strafe)       # Counter-strafe duration
+            else:
+                pyautogui.mouseDown(click_x, click_y, button='left')
+                time.sleep(duration_factor)
+                pyautogui.mouseUp(click_x, click_y, button='left')
+                time.sleep(counter_strafe)
+                
+        elif action_type == 3:  # Max left boundary
+            if VIRTUAL_MOUSE_AVAILABLE and virtual_mouse is not None:
+                virtual_mouse.mouse_up(click_x, click_y, 'left')    # Force mouse up (move left)
+                time.sleep(duration_factor)      # Side delay
+            else:
+                pyautogui.mouseUp(click_x, click_y, button='left')
+                time.sleep(duration_factor)
+                
+        elif action_type == 4:  # Max right boundary
+            if VIRTUAL_MOUSE_AVAILABLE and virtual_mouse is not None:
+                virtual_mouse.mouse_down(click_x, click_y, 'left')  # Force mouse down (move right)
+                time.sleep(duration_factor)      # Side delay
+            else:
+                pyautogui.mouseDown(click_x, click_y, button='left')
+                time.sleep(duration_factor)
+                
+        elif action_type == 5:  # Unstable left (aggressive)
+            if VIRTUAL_MOUSE_AVAILABLE and virtual_mouse is not None:
+                virtual_mouse.mouse_up(click_x, click_y, 'left')    # Mouse up first
+                time.sleep(duration_factor)      # Aggressive duration
+                virtual_mouse.mouse_down(click_x, click_y, 'left')  # Mouse down for counter-strafe
+                time.sleep(counter_strafe)       # Counter-strafe duration
+            else:
+                pyautogui.mouseUp(click_x, click_y, button='left')
+                time.sleep(duration_factor)
+                pyautogui.mouseDown(click_x, click_y, button='left') 
+                time.sleep(counter_strafe)
+                
+        elif action_type == 6:  # Unstable right (aggressive)
+            if VIRTUAL_MOUSE_AVAILABLE and virtual_mouse is not None:
+                virtual_mouse.mouse_down(click_x, click_y, 'left')  # Mouse down first
+                time.sleep(duration_factor)      # Aggressive duration
+                virtual_mouse.mouse_up(click_x, click_y, 'left')    # Mouse up for counter-strafe
+                time.sleep(counter_strafe)       # Counter-strafe duration
+            else:
+                pyautogui.mouseDown(click_x, click_y, button='left')
+                time.sleep(duration_factor)
+                pyautogui.mouseUp(click_x, click_y, button='left')
+                time.sleep(counter_strafe)
+                
+    except Exception as e:
+        print(f"Error executing minigame action: {e}")
 
 
 def main_fishing_loop():
@@ -757,8 +1142,38 @@ def main_fishing_loop():
         print(f"Failed to import required modules: {e}")
         return
     
-    # Initialize minigame controller
+    # Initialize minigame controller with AHK-style configuration
     minigame_config = MinigameConfig()
+    
+    # Set up AHK parameters for optimal performance
+    minigame_config.control = 0.2  # Typical rod Control stat (adjust based on actual rod)
+    
+    # Calculate pixel scaling based on screen resolution (AHK-style)
+    if WINDOW_MANAGER_AVAILABLE:
+        roblox_region = get_roblox_window_region()
+        if roblox_region:
+            # Calculate fish bar dimensions from Roblox window
+            window_width = roblox_region[2]
+            window_height = roblox_region[3] 
+            
+            # AHK calculation: FishBarLeft = WindowWidth/3.3160, FishBarRight = WindowWidth/1.4317
+            fish_bar_left = window_width / 3.3160
+            fish_bar_right = window_width / 1.4317
+            fish_bar_width = fish_bar_right - fish_bar_left
+            
+            # AHK pixel scaling: PixelScaling = 1034/(FishBarRight-FishBarLeft)
+            minigame_config.pixel_scaling = 1034 / fish_bar_width
+            
+            # Set boundaries based on window dimensions
+            minigame_config.max_left_bar = 0.15   # 15% from left edge
+            minigame_config.max_right_bar = 0.85  # 85% from left edge (15% from right)
+            
+            print(f"🔧 AHK Config: Fish bar width={fish_bar_width:.1f}px, Pixel scaling={minigame_config.pixel_scaling:.3f}")
+        else:
+            print("Warning: Could not get Roblox window for pixel scaling calculation")
+    else:
+        print("Warning: Window manager not available for AHK configuration")
+    
     minigame_controller = MinigameController(minigame_config)
     
     # Fishing state variables

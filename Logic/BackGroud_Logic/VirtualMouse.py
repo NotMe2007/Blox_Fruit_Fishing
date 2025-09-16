@@ -297,6 +297,46 @@ class VirtualMouse:
             MOUSEEVENTF_LEFTUP | MOUSEEVENTF_ABSOLUTE
         )
         self._send_input(up_input)
+    
+    def mouse_down(self, x: int, y: int, button: str = 'left'):
+        """Press mouse button down at specified coordinates."""
+        if button == 'left':
+            flag = MOUSEEVENTF_LEFTDOWN
+        elif button == 'right':
+            flag = MOUSEEVENTF_RIGHTDOWN
+        else:
+            raise ValueError("Button must be 'left' or 'right'")
+        
+        # Convert screen coordinates to virtual desktop coordinates
+        virtual_x = x - self.virtual_left
+        virtual_y = y - self.virtual_top
+        
+        # Convert to absolute coordinates (0-65535 range) within virtual desktop
+        abs_x = int((virtual_x * 65535) / self.virtual_width)
+        abs_y = int((virtual_y * 65535) / self.virtual_height)
+        
+        down_input = self._create_mouse_input(abs_x, abs_y, flag | MOUSEEVENTF_ABSOLUTE)
+        self._send_input(down_input)
+    
+    def mouse_up(self, x: int, y: int, button: str = 'left'):
+        """Release mouse button at specified coordinates."""
+        if button == 'left':
+            flag = MOUSEEVENTF_LEFTUP
+        elif button == 'right':
+            flag = MOUSEEVENTF_RIGHTUP
+        else:
+            raise ValueError("Button must be 'left' or 'right'")
+        
+        # Convert screen coordinates to virtual desktop coordinates
+        virtual_x = x - self.virtual_left
+        virtual_y = y - self.virtual_top
+        
+        # Convert to absolute coordinates (0-65535 range) within virtual desktop
+        abs_x = int((virtual_x * 65535) / self.virtual_width)
+        abs_y = int((virtual_y * 65535) / self.virtual_height)
+        
+        up_input = self._create_mouse_input(abs_x, abs_y, flag | MOUSEEVENTF_ABSOLUTE)
+        self._send_input(up_input)
 
 
 # Global instance for easy access

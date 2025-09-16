@@ -2,9 +2,13 @@
 
 Welcome to my macro! We call it a fishing macro, but it can be used for way more than just fishing. I'm working on making this a macro loader, meaning you can create combos and more using this tool.
 
+## Inportant
+
+If you use the macro it WILL NOT WORK CORRECTLY IF YOU USE FAST MODE!!!
+
 ## Features
 
-Note out yet still working on the project
+Note out yet still working on the project fishing ~70% done today
 
 ## Upcoming Features
 
