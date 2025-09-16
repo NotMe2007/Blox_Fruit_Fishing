@@ -10,12 +10,17 @@ import win32con
 from pathlib import Path
 import importlib.util
 
+# Add the current directory to Python path for imports
+current_dir = Path(__file__).parent
+sys.path.insert(0, str(current_dir))
+
 # Import virtual mouse driver
 virtual_mouse = None
 VIRTUAL_MOUSE_AVAILABLE = False
 
 try:
-    from VirtualMouse import virtual_mouse
+    from BackGroud_Logic.VirtualMouse import VirtualMouse
+    virtual_mouse = VirtualMouse()
     VIRTUAL_MOUSE_AVAILABLE = True
     print("✓ Virtual mouse driver loaded for fishing script!")
 except ImportError as e:
@@ -25,7 +30,7 @@ except ImportError as e:
 
 # Import window manager for proper Roblox window handling
 try:
-    from Logic.BackGroud_Logic.WindowManager import roblox_window_manager, get_roblox_coordinates, get_roblox_window_region, ensure_roblox_focused # type: ignore
+    from BackGroud_Logic.WindowManager import roblox_window_manager, get_roblox_coordinates, get_roblox_window_region, ensure_roblox_focused
     WINDOW_MANAGER_AVAILABLE = True
     print("✓ Window manager loaded for proper Roblox window detection!")
 except ImportError as e:
@@ -181,8 +186,7 @@ def validate_roblox_and_game():
     """Check if Roblox is running, in foreground, and playing Blox Fruits."""
     try:
         # Import the Roblox checker
-        sys.path.insert(0, str(Path(__file__).parent))
-        from Logic.BackGroud_Logic.IsRoblox_Open import RobloxChecker
+        from BackGroud_Logic.IsRoblox_Open import RobloxChecker
         
         checker = RobloxChecker()
         
@@ -265,33 +269,28 @@ def screen_region_image():
     return img, gray, left, top
 
 
-def CastFishingRod(x, y, hold_seconds=1.5):
+def CastFishingRod(x, y, hold_seconds=0.9):
     # Validate Roblox before casting
     if not validate_roblox_and_game():
         print("Cannot cast - Roblox validation failed!")
         return False
     
-    # Ensure Roblox window is focused and get proper coordinates
-    if WINDOW_MANAGER_AVAILABLE:
-        if not ensure_roblox_focused():
-            print("Failed to focus Roblox window!")
-            return False
+    # ALWAYS use Roblox window coordinates - no fallbacks to screen center
+    if not WINDOW_MANAGER_AVAILABLE:
+        print("ERROR: Window manager not available - cannot cast without Roblox window detection!")
+        return False
         
-        # Get proper Roblox window coordinates
-        target_x, target_y = get_roblox_coordinates()
-        if target_x is None or target_y is None:
-            print("Failed to get Roblox window coordinates!")
-            return False
-        
-        print(f"Casting in Roblox window at ({target_x}, {target_y}) holding for {hold_seconds} seconds...")
-    else:
-        # Fallback to screen center if window manager not available
-        screen_w, screen_h = pyautogui.size()
-        center_x = screen_w // 2
-        center_y = screen_h // 2
-        target_x = center_x
-        target_y = center_y - 20
-        print(f"Casting at screen center ({target_x}, {target_y}) holding for {hold_seconds} seconds...")
+    if not ensure_roblox_focused():
+        print("Failed to focus Roblox window!")
+        return False
+    
+    # Get proper Roblox window coordinates
+    target_x, target_y = get_roblox_coordinates()
+    if target_x is None or target_y is None:
+        print("Failed to get Roblox window coordinates!")
+        return False
+    
+    print(f"Casting in Roblox window at ({target_x}, {target_y}) holding for {hold_seconds} seconds...")
     
     # Human-like hold duration with slight variation
     actual_hold = hold_seconds + random.uniform(-0.1, 0.1)
@@ -300,9 +299,25 @@ def CastFishingRod(x, y, hold_seconds=1.5):
     if VIRTUAL_MOUSE_AVAILABLE and virtual_mouse is not None:
         print(f"Virtual mouse casting at ({target_x}, {target_y}) for {actual_hold:.2f}s")
         
+        # DEBUG: Check mouse position BEFORE moving
+        current_x, current_y = virtual_mouse.get_cursor_pos()
+        print(f"🔍 DEBUG: Mouse position BEFORE move: ({current_x}, {current_y})")
+        
         # Move to casting position with virtual mouse
         virtual_mouse.smooth_move_to(target_x, target_y)
         time.sleep(random.uniform(0.08, 0.15))
+        
+        # DEBUG: Check mouse position AFTER moving
+        after_x, after_y = virtual_mouse.get_cursor_pos()
+        print(f"🔍 DEBUG: Mouse position AFTER move: ({after_x}, {after_y})")
+        print(f"🔍 DEBUG: Target was: ({target_x}, {target_y})")
+        print(f"🔍 DEBUG: Difference: ({after_x - target_x:+d}, {after_y - target_y:+d})")
+        
+        # Check which monitor the mouse ended up on
+        if after_x < 1920:
+            print("⚠️  DEBUG: Mouse is on PRIMARY monitor (left screen)")
+        else:
+            print("✅ DEBUG: Mouse is on SECONDARY monitor (right screen) - where Roblox should be")
         
         # Perform virtual drag for casting (more realistic than click-hold)
         end_x = target_x + random.randint(-5, 5)  # Slight cast variation
@@ -395,20 +410,17 @@ def Fish_On_Hook(x, y, duration=0.011):
     if found:
         print(f"Fish on hook detected! Score: {score}")
         
-        # Get click position - prefer Roblox window center, fallback to screen center
-        if WINDOW_MANAGER_AVAILABLE:
-            click_x, click_y = get_roblox_coordinates()
-            if click_x is None or click_y is None:
-                # Fallback to screen center
-                click_x = screen_w // 2
-                click_y = screen_h // 2
-                print("Using screen center for minigame click")
-            else:
-                print(f"Using Roblox window center for minigame click: ({click_x}, {click_y})")
-        else:
-            # Use screen center as fallback
-            click_x = screen_w // 2
-            click_y = screen_h // 2
+        # Get click position - ONLY use Roblox window center
+        if not WINDOW_MANAGER_AVAILABLE:
+            print("ERROR: Window manager not available - cannot start minigame!")
+            return False
+            
+        click_x, click_y = get_roblox_coordinates()
+        if click_x is None or click_y is None:
+            print("ERROR: Cannot get Roblox coordinates for minigame click!")
+            return False
+        
+        print(f"Using Roblox center ({click_x}, {click_y}) for minigame click")
         
         # Use virtual mouse for minigame start if available
         if VIRTUAL_MOUSE_AVAILABLE and virtual_mouse is not None:
@@ -793,23 +805,33 @@ def main_fishing_loop():
                 fishing_state = "equipping"
                 cast_attempts = 0
                 last_rod_click_time = current_time  # Record click time
-                time.sleep(2.0)  # Wait longer for rod to equip
+                
+                # Wait for rod to equip with periodic checks
+                print("Waiting for fishing rod to equip (checking every 0.5s)...")
+                for wait_check in range(8):  # Check up to 4 seconds
+                    time.sleep(0.5)
+                    # Quick check if rod is now equipped
+                    temp_result = check_region_and_act()
+                    if temp_result is False:  # EQ detected
+                        print(f"✓ Rod equipped successfully after {(wait_check + 1) * 0.5:.1f}s")
+                        break
+                    elif temp_result is None:
+                        print(f"Checking rod status... ({wait_check + 1}/8)")
+                else:
+                    print("Rod may still be equipping, continuing with setup...")
                 
                 # After rod is equipped, perform zoom sequence and center mouse
                 print("Performing post-equip setup: zoom in -> zoom out -> center mouse...")
                 
-                # Get screen/window center for zoom operations
-                if WINDOW_MANAGER_AVAILABLE:
-                    center_x, center_y = get_roblox_coordinates()
-                    if center_x is None or center_y is None:
-                        # Fallback to screen center
-                        screen_w, screen_h = pyautogui.size()
-                        center_x = screen_w // 2
-                        center_y = screen_h // 2
-                else:
-                    screen_w, screen_h = pyautogui.size()
-                    center_x = screen_w // 2
-                    center_y = screen_h // 2
+                # Get Roblox window center for zoom operations - no fallbacks
+                if not WINDOW_MANAGER_AVAILABLE:
+                    print("ERROR: Window manager not available for post-equip setup!")
+                    return False
+                    
+                center_x, center_y = get_roblox_coordinates()
+                if center_x is None or center_y is None:
+                    print("ERROR: Cannot get Roblox coordinates for zoom operations!")
+                    return False
                 
                 # Zoom in sequence
                 print("Zooming in...")
@@ -832,11 +854,16 @@ def main_fishing_loop():
                 time.sleep(0.5)  # Brief pause before continuing
                 
             elif rod_result is False:  # EQ (equipped) detected - rod is ready
+                print(f"✓ EQ rod detected! Current state: {fishing_state}")
                 if fishing_state == "waiting" or fishing_state == "equipping":
+                    print("→ Transitioning to casting state")
                     fishing_state = "casting"
                     cast_attempts = 0
+                else:
+                    print(f"→ Already in {fishing_state} state")
                     
             elif rod_result is None:  # No clear detection or error
+                print(f"No clear rod detection (state: {fishing_state})")
                 # Continue with current state but add small delay
                 time.sleep(0.2)
                 

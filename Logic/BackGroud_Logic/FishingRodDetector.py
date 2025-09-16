@@ -13,12 +13,12 @@ virtual_mouse = None
 VIRTUAL_MOUSE_AVAILABLE = False
 
 try:
-    sys.path.insert(0, str(Path(__file__).parent.parent))
-    from VirtualMouse import virtual_mouse
+    from .VirtualMouse import VirtualMouse
+    virtual_mouse = VirtualMouse()
     VIRTUAL_MOUSE_AVAILABLE = True
-    print("✓ Virtual mouse driver loaded successfully!")
+    print("✓ Virtual mouse driver loaded in FishingRodDetector!")
 except ImportError as e:
-    print(f"Warning: Virtual mouse not available: {e}")
+    print(f"Warning: Virtual mouse not available in FishingRodDetector: {e}")
     virtual_mouse = None
     VIRTUAL_MOUSE_AVAILABLE = False
 

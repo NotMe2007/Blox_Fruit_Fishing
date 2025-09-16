@@ -88,7 +88,7 @@ def is_valid_hotkey(hotkey: str) -> bool:
 # determine the base class at runtime to ensure a proper class object is used
 _BaseClass = ctk.CTk if ctk else tk.Tk
 
-class _BaseLauncher(_BaseClass):
+class _BaseLauncher(_BaseClass): # type: ignore
     """Base launcher using CustomTkinter when available or tkinter fallback."""
     pass
 
