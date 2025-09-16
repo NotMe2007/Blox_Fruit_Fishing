@@ -4,22 +4,85 @@ import subprocess
 import threading
 import tkinter as tk
 import tkinter.messagebox as messagebox
+import json
+from typing import Dict, Optional
+
+try:
+    import keyboard
+    KEYBOARD_AVAILABLE = True
+except ImportError:
+    KEYBOARD_AVAILABLE = False
+    print("Warning: keyboard library not available. Hotkeys will not work.")
 
 try:
     import customtkinter as ctk
+    CTK_AVAILABLE = True
 except Exception:
+    CTK_AVAILABLE = False
     ctk = None
 
 # Import the Roblox checker
-from Logic.IsRoblox_Open import check_roblox_and_game
+from Logic.BackGroud_Logic.IsRoblox_Open import check_roblox_and_game
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SCRIPT_PATH = os.path.join(BASE_DIR, "Logic", "Fishing_Script.py")
+SETTINGS_FILE = os.path.join(BASE_DIR, "hotkey_settings.json")
+
+# Valid numpad keys for hotkeys
+VALID_NUMPAD_KEYS = ['num 0', 'num 1', 'num 2', 'num 3', 'num 4', 'num 5', 'num 6', 'num 7', 'num 8', 'num 9']
+MODIFIER_KEYS = ['shift', 'ctrl', 'alt']
 
 
 def resource_exists(path: str) -> bool:
     return os.path.isfile(path)
+
+
+def load_hotkey_settings() -> Dict[str, str]:
+    """Load hotkey settings from file."""
+    try:
+        if os.path.exists(SETTINGS_FILE):
+            with open(SETTINGS_FILE, 'r') as f:
+                return json.load(f)
+    except Exception as e:
+        print(f"Error loading hotkey settings: {e}")
+    
+    # Default hotkeys
+    return {
+        'start_hotkey': 'num 1',
+        'stop_hotkey': 'num 2'
+    }
+
+
+def save_hotkey_settings(settings: Dict[str, str]) -> None:
+    """Save hotkey settings to file."""
+    try:
+        with open(SETTINGS_FILE, 'w') as f:
+            json.dump(settings, f, indent=2)
+    except Exception as e:
+        print(f"Error saving hotkey settings: {e}")
+
+
+def is_valid_hotkey(hotkey: str) -> bool:
+    """Check if a hotkey is valid (numpad keys with optional modifiers)."""
+    if not hotkey or not hotkey.strip():
+        return False
+    
+    hotkey = hotkey.lower().strip()
+    
+    # Split by + to check for modifiers
+    parts = [part.strip() for part in hotkey.split('+')]
+    
+    # Last part should be a numpad key
+    if parts[-1] not in VALID_NUMPAD_KEYS:
+        return False
+    
+    # All other parts should be modifiers
+    for part in parts[:-1]:
+        if part not in MODIFIER_KEYS:
+            return False
+    
+    return True
 
 
 # determine the base class at runtime to ensure a proper class object is used
@@ -40,7 +103,7 @@ class LauncherApp(_BaseLauncher):
             super().__init__()
 
         self.title("Blox Fruit Fishing — Launcher")
-        width, height = 520, 340
+        width, height = 650, 480  # Increased height for hotkey settings
         # center window on screen
         self.geometry(f"{width}x{height}")
         self.update_idletasks()
@@ -57,6 +120,15 @@ class LauncherApp(_BaseLauncher):
         self.topmost_enabled = True
 
         self.process = None
+        
+        # Load hotkey settings
+        self.hotkey_settings = load_hotkey_settings()
+        self.hotkeys_registered = False
+        self.hotkey_entries = {}  # Store hotkey entry widgets
+        
+        # Initialize hotkeys if keyboard library is available
+        if KEYBOARD_AVAILABLE:
+            self._setup_hotkeys()
 
         if ctk:
             self._build_modern_ui()
@@ -102,7 +174,10 @@ class LauncherApp(_BaseLauncher):
         )
         self.topmost_btn.pack(pady=(6, 6))
 
-        hint = ctk.CTkLabel(container, text="Tip: Keep the game window open. Click again to stop the script.")
+        # Add hotkey configuration section
+        self._add_hotkey_section(container)
+        
+        hint = ctk.CTkLabel(container, text="Tip: Keep the game window open. Use hotkeys for quick start/stop.")
         hint.pack(side="bottom", pady=(6, 12))
 
     def _build_basic_ui(self):
@@ -122,6 +197,9 @@ class LauncherApp(_BaseLauncher):
         # Add topmost toggle button for basic UI
         self.topmost_btn = tk.Button(frame, text="📌 Always on Top: ON", width=25, height=1, command=self.toggle_topmost)
         self.topmost_btn.pack(pady=(4, 4))
+        
+        # Add hotkey configuration section for basic UI
+        self._add_hotkey_section_basic(frame)
 
     # status label intentionally removed per user request
 
@@ -190,6 +268,9 @@ class LauncherApp(_BaseLauncher):
 
     def _launch_script(self):
         try:
+            # Note: Window focusing is now handled by the fishing script itself
+            print("Starting fishing script...")
+            
             # launching - status updates removed
             # spawn the script in a separate process so GUI stays responsive
             self.process = subprocess.Popen([sys.executable, SCRIPT_PATH], cwd=os.path.dirname(SCRIPT_PATH))
@@ -218,7 +299,7 @@ class LauncherApp(_BaseLauncher):
 
     def _wait_for_blox_fruits(self):
         """Wait for user to open Blox Fruits, then automatically start the script."""
-        from Logic.IsRoblox_Open import RobloxChecker
+        from Logic.BackGroud_Logic.IsRoblox_Open import RobloxChecker
         
         try:
             checker = RobloxChecker()
@@ -260,6 +341,213 @@ class LauncherApp(_BaseLauncher):
             self.btn.configure(text="Auto Fishing", command=self.on_start)
         else:
             self.btn.configure(text="Auto Fishing", command=self.on_start)
+
+    def _add_hotkey_section(self, container):
+        """Add hotkey configuration section to modern UI."""
+        if not KEYBOARD_AVAILABLE:
+            return
+            
+        # Hotkey section frame
+        hotkey_frame = ctk.CTkFrame(container, corner_radius=12)
+        hotkey_frame.pack(fill="x", padx=20, pady=(10, 10))
+        
+        hotkey_title = ctk.CTkLabel(hotkey_frame, text="Hotkeys", font=ctk.CTkFont(size=16, weight="bold"))
+        hotkey_title.pack(pady=(10, 5))
+        
+        # Start hotkey
+        start_frame = ctk.CTkFrame(hotkey_frame, fg_color="transparent")
+        start_frame.pack(fill="x", padx=10, pady=5)
+        
+        start_label = ctk.CTkLabel(start_frame, text="START:", width=60, font=ctk.CTkFont(size=12, weight="bold"))
+        start_label.pack(side="left", padx=(0, 10))
+        
+        self.hotkey_entries['start'] = ctk.CTkEntry(
+            start_frame, 
+            width=120, 
+            placeholder_text="e.g., num 1 or shift+num 1"
+        )
+        self.hotkey_entries['start'].pack(side="left", padx=(0, 10))
+        self.hotkey_entries['start'].insert(0, self.hotkey_settings['start_hotkey'])
+        
+        # Stop hotkey
+        stop_frame = ctk.CTkFrame(hotkey_frame, fg_color="transparent")
+        stop_frame.pack(fill="x", padx=10, pady=5)
+        
+        stop_label = ctk.CTkLabel(stop_frame, text="STOP:", width=60, font=ctk.CTkFont(size=12, weight="bold"))
+        stop_label.pack(side="left", padx=(0, 10))
+        
+        self.hotkey_entries['stop'] = ctk.CTkEntry(
+            stop_frame, 
+            width=120, 
+            placeholder_text="e.g., num 2 or ctrl+num 2"
+        )
+        self.hotkey_entries['stop'].pack(side="left", padx=(0, 10))
+        self.hotkey_entries['stop'].insert(0, self.hotkey_settings['stop_hotkey'])
+        
+        # Apply button
+        apply_btn = ctk.CTkButton(
+            hotkey_frame, 
+            text="Apply Hotkeys", 
+            width=140, 
+            height=28,
+            command=self._apply_hotkeys,
+            font=ctk.CTkFont(size=11)
+        )
+        apply_btn.pack(pady=(5, 10))
+        
+        # Info text
+        info_text = "Use numpad keys (num 0-9) with optional modifiers (shift, ctrl, alt)"
+        info_label = ctk.CTkLabel(hotkey_frame, text=info_text, font=ctk.CTkFont(size=10), text_color="gray")
+        info_label.pack(pady=(0, 10))
+
+    def _add_hotkey_section_basic(self, frame):
+        """Add hotkey configuration section to basic UI."""
+        if not KEYBOARD_AVAILABLE:
+            return
+            
+        # Hotkey section frame
+        hotkey_frame = tk.LabelFrame(frame, text="Hotkeys", font=("Segoe UI", 10, "bold"), padx=10, pady=5)
+        hotkey_frame.pack(fill="x", padx=10, pady=(5, 5))
+        
+        # Start hotkey
+        start_frame = tk.Frame(hotkey_frame)
+        start_frame.pack(fill="x", pady=2)
+        
+        start_label = tk.Label(start_frame, text="START:", width=8, font=("Segoe UI", 9, "bold"))
+        start_label.pack(side="left")
+        
+        self.hotkey_entries['start'] = tk.Entry(start_frame, width=20)
+        self.hotkey_entries['start'].pack(side="left", padx=(5, 0))
+        self.hotkey_entries['start'].insert(0, self.hotkey_settings['start_hotkey'])
+        
+        # Stop hotkey
+        stop_frame = tk.Frame(hotkey_frame)
+        stop_frame.pack(fill="x", pady=2)
+        
+        stop_label = tk.Label(stop_frame, text="STOP:", width=8, font=("Segoe UI", 9, "bold"))
+        stop_label.pack(side="left")
+        
+        self.hotkey_entries['stop'] = tk.Entry(stop_frame, width=20)
+        self.hotkey_entries['stop'].pack(side="left", padx=(5, 0))
+        self.hotkey_entries['stop'].insert(0, self.hotkey_settings['stop_hotkey'])
+        
+        # Apply button
+        apply_btn = tk.Button(hotkey_frame, text="Apply Hotkeys", command=self._apply_hotkeys)
+        apply_btn.pack(pady=(5, 0))
+        
+        # Info text
+        info_label = tk.Label(hotkey_frame, text="Use numpad keys (num 0-9) with optional modifiers", 
+                             font=("Segoe UI", 8), fg="gray")
+        info_label.pack()
+
+    def _setup_hotkeys(self):
+        """Set up hotkey listeners."""
+        if not KEYBOARD_AVAILABLE or self.hotkeys_registered:
+            return
+            
+        try:
+            # Register hotkeys
+            start_hotkey = self.hotkey_settings['start_hotkey']
+            stop_hotkey = self.hotkey_settings['stop_hotkey']
+            
+            if is_valid_hotkey(start_hotkey):
+                keyboard.add_hotkey(start_hotkey, self._hotkey_start)
+            
+            if is_valid_hotkey(stop_hotkey) and start_hotkey != stop_hotkey:
+                keyboard.add_hotkey(stop_hotkey, self._hotkey_stop)
+            
+            self.hotkeys_registered = True
+            print(f"Hotkeys registered: Start={start_hotkey}, Stop={stop_hotkey}")
+            
+        except Exception as e:
+            print(f"Error setting up hotkeys: {e}")
+
+    def _clear_hotkeys(self):
+        """Clear all registered hotkeys."""
+        if not KEYBOARD_AVAILABLE or not self.hotkeys_registered:
+            return
+            
+        try:
+            keyboard.clear_all_hotkeys()
+            self.hotkeys_registered = False
+            print("All hotkeys cleared")
+        except Exception as e:
+            print(f"Error clearing hotkeys: {e}")
+
+    def _apply_hotkeys(self):
+        """Apply new hotkey settings."""
+        if not KEYBOARD_AVAILABLE:
+            messagebox.showerror("Error", "Keyboard library not available for hotkeys!")
+            return
+            
+        try:
+            # Get new hotkeys from entries
+            start_hotkey = self.hotkey_entries['start'].get().strip()
+            stop_hotkey = self.hotkey_entries['stop'].get().strip()
+            
+            # Validate hotkeys
+            if not is_valid_hotkey(start_hotkey):
+                messagebox.showerror("Invalid Hotkey", 
+                    f"Invalid start hotkey: '{start_hotkey}'\n"
+                    "Use numpad keys (num 0-9) with optional modifiers (shift, ctrl, alt)\n"
+                    "Examples: 'num 1', 'shift+num 1', 'ctrl+num 5'")
+                return
+                
+            if not is_valid_hotkey(stop_hotkey):
+                messagebox.showerror("Invalid Hotkey", 
+                    f"Invalid stop hotkey: '{stop_hotkey}'\n"
+                    "Use numpad keys (num 0-9) with optional modifiers (shift, ctrl, alt)\n"
+                    "Examples: 'num 2', 'shift+num 2', 'alt+num 9'")
+                return
+            
+            if start_hotkey == stop_hotkey:
+                messagebox.showerror("Duplicate Hotkeys", 
+                    "Start and stop hotkeys cannot be the same!")
+                return
+            
+            # Clear existing hotkeys
+            self._clear_hotkeys()
+            
+            # Update settings
+            self.hotkey_settings['start_hotkey'] = start_hotkey
+            self.hotkey_settings['stop_hotkey'] = stop_hotkey
+            
+            # Save settings
+            save_hotkey_settings(self.hotkey_settings)
+            
+            # Re-register hotkeys
+            self._setup_hotkeys()
+            
+            messagebox.showinfo("Hotkeys Updated", 
+                f"Hotkeys successfully updated!\n"
+                f"Start: {start_hotkey}\n"
+                f"Stop: {stop_hotkey}")
+                
+        except Exception as e:
+            messagebox.showerror("Error", f"Error applying hotkeys: {str(e)}")
+
+    def _hotkey_start(self):
+        """Handle start hotkey press."""
+        try:
+            # Only start if not already running
+            if not self.process or self.process.poll() is not None:
+                self.on_start()
+        except Exception as e:
+            print(f"Error in start hotkey: {e}")
+
+    def _hotkey_stop(self):
+        """Handle stop hotkey press."""
+        try:
+            # Only stop if currently running
+            if self.process and self.process.poll() is None:
+                self._stop_process()
+        except Exception as e:
+            print(f"Error in stop hotkey: {e}")
+
+    def destroy(self):
+        """Clean up hotkeys when closing the application."""
+        self._clear_hotkeys()
+        super().destroy()
 
 
 
