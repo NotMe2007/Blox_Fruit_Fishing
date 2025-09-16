@@ -770,6 +770,8 @@ def main_fishing_loop():
     rod_click_cooldown = 3.0  # Wait 3 seconds before clicking rod again
     last_validation_time = 0  # Track when we last validated Roblox
     validation_interval = 5.0  # Only validate every 5 seconds to reduce spam
+    cast_start_time = 0  # Track when we started waiting for fish
+    fishing_timeout = 30.0  # 30 seconds timeout for fish to bite
     
     try:
         while True:
@@ -880,16 +882,35 @@ def main_fishing_loop():
                 time.sleep(2)  # Wait for cast to complete
                 
                 fishing_state = "hooking"
+                cast_start_time = time.time()  # Record when we start waiting for fish
                 cast_attempts += 1
+                print(f"Started waiting for fish at {cast_start_time:.1f} (30s timeout)")
                 
             elif fishing_state == "hooking":
-                print("Waiting for fish to bite...")
+                # Check for 30-second timeout (Roblox thinks clicking too fast)
+                current_time = time.time()
+                time_waiting = current_time - cast_start_time
+                time_remaining = fishing_timeout - time_waiting
+                
+                if time_waiting >= fishing_timeout:
+                    print(f"⏰ TIMEOUT: No fish after {time_waiting:.1f}s - Roblox may think we're clicking too fast!")
+                    print("🔄 Unequipping and re-equipping fishing rod to reset state...")
+                    fishing_state = "waiting"  # This will trigger rod detection and re-equipping
+                    cast_attempts = 0
+                    time.sleep(1)  # Brief pause before restarting
+                    continue
+                
+                # Show countdown every 5 seconds
+                if int(time_waiting) % 5 == 0 and int(time_waiting) > 0:
+                    print(f"🎣 Waiting for fish to bite... ({time_remaining:.0f}s remaining)")
+                else:
+                    print("🎣 Waiting for fish to bite...")
                 
                 # Check for fish on hook
                 hook_result = Fish_On_Hook(0, 0)  # Coordinates not used in current implementation
                 
                 if hook_result:
-                    print("Fish detected! Starting minigame...")
+                    print("🐟 Fish detected! Starting minigame...")
                     fishing_state = "minigame"
                     minigame_start_time = time.time()
                 
@@ -899,7 +920,7 @@ def main_fishing_loop():
                 # Check shift state
                 Shift_State(0, 0)
                 
-                # Timeout after 30 seconds of waiting
+                # Fallback timeout after max cast attempts
                 if cast_attempts >= max_cast_attempts:
                     print("Max cast attempts reached, resetting...")
                     fishing_state = "waiting"
