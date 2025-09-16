@@ -3,9 +3,76 @@ import pyautogui
 import numpy as np
 import sys
 import time
+import random
+import math
+import win32gui
 from pathlib import Path
 
+# Import virtual mouse driver
+virtual_mouse = None
+VIRTUAL_MOUSE_AVAILABLE = False
+
+try:
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    from VirtualMouse import virtual_mouse
+    VIRTUAL_MOUSE_AVAILABLE = True
+    print("✓ Virtual mouse driver loaded successfully!")
+except ImportError as e:
+    print(f"Warning: Virtual mouse not available: {e}")
+    virtual_mouse = None
+    VIRTUAL_MOUSE_AVAILABLE = False
+
 pyautogui.FAILSAFE = True
+
+
+def smooth_move_to(target_x, target_y, duration=None):
+    """
+    Smoothly move mouse to target position with human-like curves and acceleration.
+    """
+    start_x, start_y = pyautogui.position()
+    
+    # Calculate distance and auto-adjust duration if not specified
+    distance = math.sqrt((target_x - start_x) ** 2 + (target_y - start_y) ** 2)
+    if duration is None:
+        # Much faster movement - humans are quick with mouse
+        duration = min(0.05 + distance * 0.0005, 0.3)  # 0.05s to 0.3s max (much faster!)
+    
+    # Less variation to keep it snappy
+    duration = duration * random.uniform(0.9, 1.1)
+    
+    # Fewer steps for faster movement
+    steps = max(5, int(duration * 60))  # Fewer steps, faster movement
+    
+    # Smaller curves for more direct movement
+    control_factor = random.uniform(0.05, 0.15)  # Less curve
+    mid_x = (start_x + target_x) / 2 + random.randint(-10, 10) * control_factor
+    mid_y = (start_y + target_y) / 2 + random.randint(-10, 10) * control_factor
+    
+    for i in range(steps + 1):
+        progress = i / steps
+        
+        # Smooth acceleration/deceleration curve (ease-in-out)
+        smooth_progress = 0.5 - 0.5 * math.cos(progress * math.pi)
+        
+        # Quadratic bezier curve for natural movement
+        t = smooth_progress
+        x = (1-t)**2 * start_x + 2*(1-t)*t * mid_x + t**2 * target_x
+        y = (1-t)**2 * start_y + 2*(1-t)*t * mid_y + t**2 * target_y
+        
+        # Much smaller jitter for faster, more precise movement
+        jitter_x = random.uniform(-0.2, 0.2)
+        jitter_y = random.uniform(-0.2, 0.2)
+        
+        final_x = int(x + jitter_x)
+        final_y = int(y + jitter_y)
+        
+        pyautogui.moveTo(final_x, final_y)
+        
+        # Much faster step timing
+        step_delay = duration / steps
+        # Less variation for smoother, faster movement
+        step_delay *= random.uniform(0.8, 1.2)
+        time.sleep(step_delay)
 
 # Config
 # Templates live in the Images/ folder relative to the project root
@@ -23,10 +90,15 @@ def load_templates():
     # Use absolute paths so imports from other folders find them reliably
     un_color = cv2.imread(str(UN_PATH))
     eq_color = cv2.imread(str(EQ_PATH))
-    if un_color is None or eq_color is None:
+    
+    # Check if images loaded successfully (handle both None and empty arrays)
+    un_valid = un_color is not None and un_color.size > 0
+    eq_valid = eq_color is not None and eq_color.size > 0
+    
+    if not un_valid or not eq_valid:
         print(f"Error: Could not load template images. Looking for:\n  {UN_PATH}\n  {EQ_PATH}")
         sys.exit(1)
-    return cv2.cvtColor(un_color, cv2.COLOR_BGR2GRAY), cv2.cvtColor(eq_color, cv2.COLOR_BGR2GRAY)
+    return cv2.cvtColor(un_color, cv2.COLOR_BGR2GRAY), cv2.cvtColor(eq_color, cv2.COLOR_BGR2GRAY) # type: ignore
 
 
 def multi_scale_match(screenshot_gray, template_gray, scales=None):
@@ -87,12 +159,13 @@ def multi_scale_match(screenshot_gray, template_gray, scales=None):
         combined = 0.75 * float(max_val_i) + 0.25 * float(max_val_e)
 
         if combined > best_val:
-            best_val = combined
+            best_val = float(combined)  # Ensure it's a scalar
             best_loc = max_loc_i if max_loc_i is not None else max_loc_e
             best_scale = scale
             best_size = (new_w, new_h)
 
-    return best_val, best_loc, best_scale, best_size
+    # Return scalar values
+    return float(best_val), best_loc, best_scale, best_size
 
 
 def check_region_and_act():
@@ -104,6 +177,18 @@ def check_region_and_act():
         False: EQ (equipped) rod detected - ready to fish
         None: No clear detection
     """
+    # Quick validation - check if Roblox window is in foreground
+    try:
+        foreground_hwnd = win32gui.GetForegroundWindow()
+        foreground_title = win32gui.GetWindowText(foreground_hwnd).lower()
+        
+        if 'roblox' not in foreground_title:
+            print("WARNING: Roblox is not in foreground. Skipping rod detection.")
+            return None
+    except Exception as e:
+        print(f"Error checking foreground window: {e}")
+        return None
+    
     try:
         un_gray, eq_gray = load_templates()
     except Exception as e:
@@ -152,17 +237,78 @@ def check_region_and_act():
         cv2.imwrite(dbg_path, dbg)
         print(f'Saved debug image: {dbg_path}')
 
-    # Decide
-    if best_un_loc is not None and best_un_size is not None and best_un_val >= threshold and best_un_val > best_eq_val:
+    # Decide - ensure all values are scalar
+    best_un_val_scalar = float(best_un_val) if best_un_val is not None else -1.0
+    best_eq_val_scalar = float(best_eq_val) if best_eq_val is not None else -1.0
+    
+    if (best_un_loc is not None and best_un_size is not None and 
+        best_un_val_scalar >= threshold and best_un_val_scalar > best_eq_val_scalar):
         tw, th = best_un_size
         click_x = left + int(best_un_loc[0]) + tw // 2
         click_y = top + int(best_un_loc[1]) + th // 2
-        pyautogui.click(click_x, click_y)
-        print(f'Clicked at ({click_x}, {click_y}) - UN detected (score={best_un_val:.3f})')
+        
+        print(f'UN rod detected at ({click_x}, {click_y}) - score={best_un_val_scalar:.3f}')
+        
+        # Use virtual mouse driver for undetectable input
+        if VIRTUAL_MOUSE_AVAILABLE and virtual_mouse is not None:
+            print("Using virtual mouse driver for hardware-level input")
+            success = virtual_mouse.human_click(click_x, click_y)
+            if success:
+                print(f'Virtual mouse click performed at ({click_x}, {click_y})')
+                return True
+            else:
+                print("Virtual mouse click failed, falling back to pyautogui")
+        
+        # Fallback to regular mouse if virtual mouse fails
+        print("Using fallback pyautogui input")
+        offset_x = random.randint(-2, 2)
+        offset_y = random.randint(-2, 2)
+        final_x = click_x + offset_x
+        final_y = click_y + offset_y
+        
+        smooth_move_to(final_x, final_y)
+        time.sleep(random.uniform(0.05, 0.15))
+        
+        # Super human-like click with varied patterns
+        click_type = random.randint(1, 3)
+        
+        if click_type == 1:
+            # Quick single click
+            duration = random.uniform(0.04, 0.08)
+            pyautogui.mouseDown(final_x, final_y, button='left')
+            time.sleep(duration)
+            pyautogui.mouseUp(final_x, final_y, button='left')
+            
+        elif click_type == 2:
+            # Double click (sometimes humans do this accidentally)
+            duration1 = random.uniform(0.03, 0.06)
+            pyautogui.mouseDown(final_x, final_y, button='left')
+            time.sleep(duration1)
+            pyautogui.mouseUp(final_x, final_y, button='left')
+            
+            time.sleep(random.uniform(0.02, 0.05))  # Brief pause
+            
+            duration2 = random.uniform(0.03, 0.06)
+            pyautogui.mouseDown(final_x, final_y, button='left')
+            time.sleep(duration2)
+            pyautogui.mouseUp(final_x, final_y, button='left')
+            
+        else:
+            # Click with slight hold
+            duration = random.uniform(0.08, 0.15)
+            pyautogui.mouseDown(final_x, final_y, button='left')
+            time.sleep(duration)
+            pyautogui.mouseUp(final_x, final_y, button='left')
+        
+        print(f'Human-like click performed at ({final_x}, {final_y}) pattern: {click_type}')
+        
+        # Random pause after click to simulate human behavior
+        time.sleep(random.uniform(0.15, 0.4))
         return True
 
-    if best_eq_loc is not None and best_eq_size is not None and best_eq_val >= threshold and best_eq_val > best_un_val:
-        print(f'EQ detected in region - Ending script (score={best_eq_val:.3f})')
+    if (best_eq_loc is not None and best_eq_size is not None and 
+        best_eq_val_scalar >= threshold and best_eq_val_scalar > best_un_val_scalar):
+        print(f'EQ detected in region - Ending script (score={best_eq_val_scalar:.3f})')
         return False
 
     print('No UN or EQ detected in the region')
@@ -170,13 +316,23 @@ def check_region_and_act():
 
 
 # Load templates that are expected by Fishing_Script.py
+def safe_load_template(path):
+    """Safely load a template image, handling both None and empty array cases."""
+    try:
+        img = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
+        if img is not None and img.size > 0:
+            return img
+    except Exception:
+        pass
+    return None
+
 try:
-    FISH_ON_HOOK_TPL = cv2.imread(str(IMAGES_DIR / 'Fish_On_Hook.png'), cv2.IMREAD_GRAYSCALE)
-    FISH_LEFT_TPL = cv2.imread(str(IMAGES_DIR / 'Fish_Left.png'), cv2.IMREAD_GRAYSCALE)
-    FISH_RIGHT_TPL = cv2.imread(str(IMAGES_DIR / 'Fish_Right.png'), cv2.IMREAD_GRAYSCALE)
-    SHIFT_LOCK_TPL = cv2.imread(str(IMAGES_DIR / 'Shift_Lock.png'), cv2.IMREAD_GRAYSCALE)
-    POWER_MAX_TPL = cv2.imread(str(IMAGES_DIR / 'Power_Max.png'), cv2.IMREAD_GRAYSCALE)
-    POWER_ACTIVE_TPL = cv2.imread(str(IMAGES_DIR / 'Power_Active.png'), cv2.IMREAD_GRAYSCALE)
+    FISH_ON_HOOK_TPL = safe_load_template(IMAGES_DIR / 'Fish_On_Hook.png')
+    FISH_LEFT_TPL = safe_load_template(IMAGES_DIR / 'Fish_Left.png')
+    FISH_RIGHT_TPL = safe_load_template(IMAGES_DIR / 'Fish_Right.png')
+    SHIFT_LOCK_TPL = safe_load_template(IMAGES_DIR / 'Shift_Lock.png')
+    POWER_MAX_TPL = safe_load_template(IMAGES_DIR / 'Power_Max.png')
+    POWER_ACTIVE_TPL = safe_load_template(IMAGES_DIR / 'Power_Active.png')
 except Exception as e:
     print(f"Warning: Could not load some template images: {e}")
     FISH_ON_HOOK_TPL = None
