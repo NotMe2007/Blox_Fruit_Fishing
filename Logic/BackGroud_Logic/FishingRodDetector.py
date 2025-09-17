@@ -13,14 +13,24 @@ virtual_mouse = None
 VIRTUAL_MOUSE_AVAILABLE = False
 
 try:
+    # Try relative import first (when imported as package)
     from .VirtualMouse import VirtualMouse
     virtual_mouse = VirtualMouse()
     VIRTUAL_MOUSE_AVAILABLE = True
-    print("✓ Virtual mouse driver loaded in FishingRodDetector!")
-except ImportError as e:
-    print(f"Warning: Virtual mouse not available in FishingRodDetector: {e}")
-    virtual_mouse = None
-    VIRTUAL_MOUSE_AVAILABLE = False
+except ImportError:
+    try:
+        # Add current directory to path and try absolute import
+        import sys
+        import os
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        if current_dir not in sys.path:
+            sys.path.insert(0, current_dir)
+        from VirtualMouse import VirtualMouse
+        virtual_mouse = VirtualMouse()
+        VIRTUAL_MOUSE_AVAILABLE = True
+    except ImportError:
+        virtual_mouse = None
+        VIRTUAL_MOUSE_AVAILABLE = False
 
 pyautogui.FAILSAFE = True
 

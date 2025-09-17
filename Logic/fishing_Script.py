@@ -49,51 +49,40 @@ pyautogui.FAILSAFE = True
 
 def smooth_move_to(target_x, target_y, duration=None):
     """
-    Smoothly move mouse to target position with human-like curves and acceleration.
+    Move mouse to target position. Uses instant movement with virtual mouse (undetected),
+    fallback to smooth movement with PyAutoGUI when virtual mouse unavailable.
     """
+    # If virtual mouse is available, use instant movement (no delays needed - undetected)
+    if VIRTUAL_MOUSE_AVAILABLE and virtual_mouse is not None:
+        try:
+            virtual_mouse.move_to(target_x, target_y)
+            return
+        except Exception as e:
+            print(f"Virtual mouse move failed, falling back to PyAutoGUI: {e}")
+    
+    # Fallback: PyAutoGUI with minimal smooth movement for compatibility
     start_x, start_y = pyautogui.position()
     
-    # Calculate distance and auto-adjust duration if not specified
+    # Calculate distance and minimal duration for system responsiveness
     distance = math.sqrt((target_x - start_x) ** 2 + (target_y - start_y) ** 2)
     if duration is None:
-        # Much faster movement - humans are quick with mouse
-        duration = min(0.05 + distance * 0.0005, 0.3)  # 0.05s to 0.3s max (much faster!)
+        # Minimal duration for system to register movement
+        duration = min(0.01 + distance * 0.0001, 0.05)  # 0.01s to 0.05s max (very fast!)
     
-    # Less variation to keep it snappy
-    duration = duration * random.uniform(0.9, 1.1)
-    
-    # Fewer steps for faster movement
-    steps = max(5, int(duration * 60))  # Fewer steps, faster movement
-    
-    # Smaller curves for more direct movement
-    control_factor = random.uniform(0.05, 0.15)  # Less curve
-    mid_x = (start_x + target_x) / 2 + random.randint(-10, 10) * control_factor
-    mid_y = (start_y + target_y) / 2 + random.randint(-10, 10) * control_factor
+    # Minimal steps for fastest movement
+    steps = max(2, int(duration * 30))  # Fewer steps, much faster
     
     for i in range(steps + 1):
         progress = i / steps
         
-        # Smooth acceleration/deceleration curve (ease-in-out)
-        smooth_progress = 0.5 - 0.5 * math.cos(progress * math.pi)
+        # Linear interpolation (no curves needed)
+        x = start_x + (target_x - start_x) * progress
+        y = start_y + (target_y - start_y) * progress
         
-        # Quadratic bezier curve for natural movement
-        t = smooth_progress
-        x = (1-t)**2 * start_x + 2*(1-t)*t * mid_x + t**2 * target_x
-        y = (1-t)**2 * start_y + 2*(1-t)*t * mid_y + t**2 * target_y
+        pyautogui.moveTo(int(x), int(y))
         
-        # Much smaller jitter for faster, more precise movement
-        jitter_x = random.uniform(-0.2, 0.2)
-        jitter_y = random.uniform(-0.2, 0.2)
-        
-        final_x = int(x + jitter_x)
-        final_y = int(y + jitter_y)
-        
-        pyautogui.moveTo(final_x, final_y)
-        
-        # Much faster step timing
+        # Minimal step timing for system responsiveness only
         step_delay = duration / steps
-        # Less variation for smoother, faster movement
-        step_delay *= random.uniform(0.8, 1.2)
         time.sleep(step_delay)
 
 
@@ -303,9 +292,8 @@ def CastFishingRod(x, y, hold_seconds=0.9):
         current_x, current_y = virtual_mouse.get_cursor_pos()
         print(f"🔍 DEBUG: Mouse position BEFORE move: ({current_x}, {current_y})")
         
-        # Move to casting position with virtual mouse
+        # Move to casting position with virtual mouse (instant - no delays needed)
         virtual_mouse.smooth_move_to(target_x, target_y)
-        time.sleep(random.uniform(0.08, 0.15))
         
         # DEBUG: Check mouse position AFTER moving
         after_x, after_y = virtual_mouse.get_cursor_pos()
@@ -335,7 +323,6 @@ def CastFishingRod(x, y, hold_seconds=0.9):
         final_y = target_y + offset_y
         
         smooth_move_to(final_x, final_y)
-        time.sleep(random.uniform(0.08, 0.15))
         
         print(f"Fallback casting at ({final_x}, {final_y}) for {actual_hold:.2f}s")
         
@@ -345,23 +332,31 @@ def CastFishingRod(x, y, hold_seconds=0.9):
         
         print("Fallback casting completed!")
     
-    # Random delay after cast
-    time.sleep(random.uniform(0.1, 0.2))
     return True
 
-def Zoom_In(x, y, duration=0.011):
-    # Simulate pressing 'i' 45 times to zoom in. Presses occur every `duration` seconds.
+def Zoom_In(x, y, duration=0.05):
+    # Simulate pressing 'i' 45 times to zoom in. Ensures Roblox focus first.
     # x,y are kept for API compatibility but aren't used for key presses.
+    
+    # Ensure Roblox window is focused for keyboard input
+    if WINDOW_MANAGER_AVAILABLE:
+        ensure_roblox_focused()
+    
     for _ in range(45):
         pyautogui.press('i')
-        time.sleep(duration)
+        time.sleep(duration)  # Delay for Roblox key registration
 
-def Zoom_Out(x, y, duration=0.011):
-    # Simulate pressing '0' four times to zoom out. Presses occur every `duration` seconds.
+def Zoom_Out(x, y, duration=0.05):
+    # Simulate pressing 'o' four times to zoom out. Ensures Roblox focus first.
     # x,y are kept for API compatibility but aren't used for key presses.
+    
+    # Ensure Roblox window is focused for keyboard input
+    if WINDOW_MANAGER_AVAILABLE:
+        ensure_roblox_focused()
+    
     for _ in range(4):
-        pyautogui.press('0')
-        time.sleep(duration)
+        pyautogui.press('o')
+        time.sleep(duration)  # Delay for Roblox key registration
 
 def Fish_On_Hook(x, y, duration=0.011):
     """Detect the fish-on-hook indicator and click the current mouse position.
@@ -426,11 +421,8 @@ def Fish_On_Hook(x, y, duration=0.011):
         if VIRTUAL_MOUSE_AVAILABLE and virtual_mouse is not None:
             print(f"Virtual mouse starting minigame at ({click_x}, {click_y})")
             
-            # First click
+            # First click (instant - no delays needed with virtual mouse)
             success1 = virtual_mouse.human_click(click_x, click_y)
-            
-            # Short delay between clicks
-            time.sleep(random.uniform(0.05, 0.15))
             
             # Second click to ensure minigame starts
             success2 = virtual_mouse.human_click(click_x, click_y)
@@ -450,27 +442,20 @@ def Fish_On_Hook(x, y, duration=0.011):
             
             smooth_move_to(final_x, final_y)
             
-            # First click with human timing
-            time.sleep(random.uniform(0.05, 0.12))
-            click_duration1 = random.uniform(0.08, 0.15)
-            
+            # First click with minimal timing
             pyautogui.mouseDown(final_x, final_y, button='left')
-            time.sleep(click_duration1)
+            time.sleep(0.05)  # Minimal click duration
             pyautogui.mouseUp(final_x, final_y, button='left')
             
-            # Short delay between clicks
-            time.sleep(random.uniform(0.05, 0.15))
+            # Short delay between clicks for system registration
+            time.sleep(0.02)
             
             # Second click to ensure minigame starts
-            click_duration2 = random.uniform(0.08, 0.15)
             pyautogui.mouseDown(final_x, final_y, button='left')
-            time.sleep(click_duration2)
+            time.sleep(0.05)  # Minimal click duration
             pyautogui.mouseUp(final_x, final_y, button='left')
             
-            print(f"Fallback minigame clicks completed! Durations: {click_duration1:.3f}s, {click_duration2:.3f}s")
-        
-        # Random pause to avoid double-detecting
-        time.sleep(random.uniform(0.2, 0.4))
+            print("Fallback minigame clicks completed!")
         return True
     return False
 
@@ -527,6 +512,7 @@ try:
     FISH_LEFT_TPL = safe_load_template(IMAGES_DIR / 'Fish_Left.png')
     FISH_RIGHT_TPL = safe_load_template(IMAGES_DIR / 'Fish_Right.png')
     SHIFT_LOCK_TPL = safe_load_template(IMAGES_DIR / 'Shift_Lock.png')
+    MINIGAME_BAR_TPL = safe_load_template(IMAGES_DIR / 'MiniGame_Bar.png')
 except Exception:
     # set templates to None if loading fails
     POWER_MAX_TPL = None
@@ -535,6 +521,7 @@ except Exception:
     FISH_LEFT_TPL = None
     FISH_RIGHT_TPL = None
     SHIFT_LOCK_TPL = None
+    MINIGAME_BAR_TPL = None
 
 
 def _match_template_in_region(template, region, threshold=0.80):
@@ -930,11 +917,31 @@ def detect_white_indicator_image_based(screenshot_bgr):
 
 def detect_minigame_bar_presence(screenshot_bgr):
     """
-    Fast detection of minigame bar presence using edge detection and shape analysis.
+    Detect minigame bar presence using template matching with MiniGame_Bar.png.
+    Fallback to edge detection if template is not available.
     Returns True if minigame bar is detected, False otherwise.
     """
     try:
-        # Convert to grayscale for edge detection
+        # Primary method: Template matching with MiniGame_Bar.png
+        if MINIGAME_BAR_TPL is not None:
+            # Convert screenshot to grayscale for template matching
+            gray = cv2.cvtColor(screenshot_bgr, cv2.COLOR_BGR2GRAY)
+            
+            # Perform template matching
+            result = cv2.matchTemplate(gray, MINIGAME_BAR_TPL, cv2.TM_CCOEFF_NORMED)
+            min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
+            
+            # Use a confidence threshold to determine if bar is present
+            confidence_threshold = 0.7
+            if max_val >= confidence_threshold:
+                print(f"✓ Minigame bar detected using template matching (confidence: {max_val:.3f})")
+                return True
+            else:
+                print(f"Minigame bar template match below threshold (confidence: {max_val:.3f})")
+        else:
+            print("Warning: MiniGame_Bar.png template not loaded, using fallback detection")
+        
+        # Fallback method: Edge detection and shape analysis
         gray = cv2.cvtColor(screenshot_bgr, cv2.COLOR_BGR2GRAY)
         
         # Apply Gaussian blur to reduce noise
@@ -959,6 +966,7 @@ def detect_minigame_bar_presence(screenshot_bgr):
                     
             # If we found multiple horizontal lines, likely a minigame bar
             if horizontal_lines >= 2:
+                print(f"Minigame bar detected using fallback edge detection ({horizontal_lines} horizontal lines)")
                 return True
         
         # Fallback: check for rectangular shapes (bar outline)
@@ -972,6 +980,7 @@ def detect_minigame_bar_presence(screenshot_bgr):
             if len(approx) >= 4 and len(approx) <= 6:
                 area = cv2.contourArea(contour)
                 if area > 1000:  # Large enough to be a minigame bar
+                    print("Minigame bar detected using fallback contour analysis")
                     return True
         
         return False
@@ -1196,15 +1205,15 @@ def main_fishing_loop():
                 if not validate_roblox_and_game():
                     print("Roblox validation failed. Bringing to front and retrying...")
                     if not bring_roblox_to_front():
-                        print("Failed to bring Roblox to front. Waiting 5 seconds...")
-                        time.sleep(5)
+                        print("Failed to bring Roblox to front. Waiting 2 seconds...")
+                        time.sleep(2)
                         continue
                     # Wait a moment after bringing to front
-                    time.sleep(1)
+                    time.sleep(0.5)
                     # Revalidate after bringing to front
                     if not validate_roblox_and_game():
-                        print("Still unable to validate Roblox. Waiting 5 seconds...")
-                        time.sleep(5)
+                        print("Still unable to validate Roblox. Waiting 2 seconds...")
+                        time.sleep(2)
                         continue
                 last_validation_time = current_time
             
@@ -1294,7 +1303,7 @@ def main_fishing_loop():
                 
                 # Cast the rod
                 CastFishingRod(screen_w // 2, screen_h // 2 - 20)
-                time.sleep(2)  # Wait for cast to complete
+                time.sleep(0.5)  # Minimal wait for cast to register
                 
                 fishing_state = "hooking"
                 cast_start_time = time.time()  # Record when we start waiting for fish
@@ -1312,7 +1321,7 @@ def main_fishing_loop():
                     print("🔄 Unequipping and re-equipping fishing rod to reset state...")
                     fishing_state = "waiting"  # This will trigger rod detection and re-equipping
                     cast_attempts = 0
-                    time.sleep(1)  # Brief pause before restarting
+                    time.sleep(0.2)  # Brief pause before restarting
                     continue
                 
                 # Show countdown every 5 seconds
@@ -1356,7 +1365,7 @@ def main_fishing_loop():
                     # Zoom out after fishing
                     screen_w, screen_h = pyautogui.size()
                     Zoom_Out(screen_w // 2, screen_h // 2)
-                    time.sleep(1)  # Brief pause before next cycle
+                    time.sleep(0.2)  # Brief pause before next cycle
                 
             # Small delay between iterations
             time.sleep(0.1)

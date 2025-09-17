@@ -27,7 +27,7 @@ from Logic.BackGroud_Logic.IsRoblox_Open import check_roblox_and_game
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SCRIPT_PATH = os.path.join(BASE_DIR, "Logic", "Fishing_Script.py")
-SETTINGS_FILE = os.path.join(BASE_DIR, "hotkey_settings.json")
+SETTINGS_FILE = os.path.join(BASE_DIR, "Logic", "BackGroud_Logic", "hotkey_settings.json")
 
 # Valid numpad keys for hotkeys
 VALID_NUMPAD_KEYS = ['num 0', 'num 1', 'num 2', 'num 3', 'num 4', 'num 5', 'num 6', 'num 7', 'num 8', 'num 9']
