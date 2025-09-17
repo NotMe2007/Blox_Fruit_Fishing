@@ -65,7 +65,7 @@ class MinigameConfig:
     # Stability multipliers/divisions (from AHK script - exact values)
     stable_right_multiplier: float = 2.36
     stable_right_division: float = 1.55
-    stable_left_multiplier: float = 1.211
+    stable_left_multiplier: float = 1.1
     stable_left_division: float = 1.12
 
     # Unstable multipliers/divisions (from AHK script - exact values)

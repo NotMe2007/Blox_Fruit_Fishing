@@ -22,9 +22,7 @@ try:
     from BackGroud_Logic.VirtualMouse import VirtualMouse
     virtual_mouse = VirtualMouse()
     VIRTUAL_MOUSE_AVAILABLE = True
-    print("✓ Virtual mouse driver loaded for fishing script!")
 except ImportError as e:
-    print(f"Warning: Virtual mouse not available in fishing script: {e}")
     virtual_mouse = None
     VIRTUAL_MOUSE_AVAILABLE = False
 
@@ -32,9 +30,7 @@ except ImportError as e:
 try:
     from BackGroud_Logic.WindowManager import roblox_window_manager, get_roblox_coordinates, get_roblox_window_region, ensure_roblox_focused # type: ignore
     WINDOW_MANAGER_AVAILABLE = True
-    print("✓ Window manager loaded for proper Roblox window detection!")
 except ImportError as e:
-    print(f"Warning: Window manager not available: {e}")
     WINDOW_MANAGER_AVAILABLE = False
     # Define dummy functions for fallback
     def get_roblox_coordinates():
@@ -58,7 +54,7 @@ def smooth_move_to(target_x, target_y, duration=None):
             virtual_mouse.move_to(target_x, target_y)
             return
         except Exception as e:
-            print(f"Virtual mouse move failed, falling back to PyAutoGUI: {e}")
+            pass
     
     # Fallback: PyAutoGUI with minimal smooth movement for compatibility
     start_x, start_y = pyautogui.position()
@@ -111,7 +107,6 @@ def bring_roblox_to_front():
     roblox_windows = find_roblox_window()
     
     if not roblox_windows:
-        print("ERROR: No Roblox window found!")
         return False
     
     # Use the first Roblox window found
@@ -130,7 +125,7 @@ def bring_roblox_to_front():
             win32gui.SetForegroundWindow(hwnd)
             success = True
         except Exception as e:
-            print(f"SetForegroundWindow failed: {e}")
+            pass
         
         if not success:
             try:
@@ -140,12 +135,11 @@ def bring_roblox_to_front():
                 win32gui.BringWindowToTop(hwnd)
                 success = True
             except Exception as e:
-                print(f"Alternative window method failed: {e}")
+                pass
         
         if not success and VIRTUAL_MOUSE_AVAILABLE and virtual_mouse is not None:
             try:
                 # Method 3: Click on the window to bring it to front
-                print("Using virtual mouse to click Roblox window...")
                 rect = win32gui.GetWindowRect(hwnd)
                 center_x = (rect[0] + rect[2]) // 2
                 center_y = (rect[1] + rect[3]) // 2
@@ -154,20 +148,16 @@ def bring_roblox_to_front():
                 virtual_mouse.human_click(center_x, center_y)
                 time.sleep(0.5)
                 success = True
-                print("Virtual mouse window focus completed")
             except Exception as e:
-                print(f"Virtual mouse window focus failed: {e}")
+                pass
         
         if success:
-            print(f"Successfully focused Roblox window: {title}")
             time.sleep(0.5)  # Give window time to come to front
             return True
         else:
-            print("All window focus methods failed")
             return False
     
     except Exception as e:
-        print(f"Error in bring_roblox_to_front: {e}")
         return False
 
 
@@ -188,11 +178,8 @@ def validate_roblox_and_game():
         if isinstance(game_result, tuple):
             is_blox, game_name, _ = game_result
             if not is_blox:
-                print("ERROR: Not playing Blox Fruits!")
-                print(f"Current game: {game_name if game_name else 'Unknown'}")
                 return False
         else:
-            print("ERROR: Could not detect current game!")
             return False
         
         # Check if Roblox window is in foreground
@@ -200,15 +187,11 @@ def validate_roblox_and_game():
         foreground_title = win32gui.GetWindowText(foreground_hwnd).lower()
         
         if 'roblox' not in foreground_title:
-            print("ERROR: Roblox window is not in foreground!")
-            print(f"Current foreground: {win32gui.GetWindowText(foreground_hwnd)}")
             return False
         
-        print("✓ Roblox is running Blox Fruits and in foreground")
         return True
         
     except Exception as e:
-        print(f"Error validating Roblox: {e}")
         return False
 
 
@@ -258,65 +241,38 @@ def screen_region_image():
     return img, gray, left, top
 
 
-def CastFishingRod(x, y, hold_seconds=0.9):
+def CastFishingRod(x, y, hold_seconds=0.93):
     # Validate Roblox before casting
     if not validate_roblox_and_game():
-        print("Cannot cast - Roblox validation failed!")
         return False
     
     # ALWAYS use Roblox window coordinates - no fallbacks to screen center
     if not WINDOW_MANAGER_AVAILABLE:
-        print("ERROR: Window manager not available - cannot cast without Roblox window detection!")
         return False
         
     if not ensure_roblox_focused():
-        print("Failed to focus Roblox window!")
         return False
     
     # Get proper Roblox window coordinates
     target_x, target_y = get_roblox_coordinates()
     if target_x is None or target_y is None:
-        print("Failed to get Roblox window coordinates!")
         return False
-    
-    print(f"Casting in Roblox window at ({target_x}, {target_y}) holding for {hold_seconds} seconds...")
     
     # Human-like hold duration with slight variation
     actual_hold = hold_seconds + random.uniform(-0.1, 0.1)
     
     # Use virtual mouse for casting if available
     if VIRTUAL_MOUSE_AVAILABLE and virtual_mouse is not None:
-        print(f"Virtual mouse casting at ({target_x}, {target_y}) for {actual_hold:.2f}s")
-        
-        # DEBUG: Check mouse position BEFORE moving
-        current_x, current_y = virtual_mouse.get_cursor_pos()
-        print(f"🔍 DEBUG: Mouse position BEFORE move: ({current_x}, {current_y})")
-        
         # Move to casting position with virtual mouse (instant - no delays needed)
         virtual_mouse.smooth_move_to(target_x, target_y)
-        
-        # DEBUG: Check mouse position AFTER moving
-        after_x, after_y = virtual_mouse.get_cursor_pos()
-        print(f"🔍 DEBUG: Mouse position AFTER move: ({after_x}, {after_y})")
-        print(f"🔍 DEBUG: Target was: ({target_x}, {target_y})")
-        print(f"🔍 DEBUG: Difference: ({after_x - target_x:+d}, {after_y - target_y:+d})")
-        
-        # Check which monitor the mouse ended up on
-        if after_x < 1920:
-            print("⚠️  DEBUG: Mouse is on PRIMARY monitor (left screen)")
-        else:
-            print("✅ DEBUG: Mouse is on SECONDARY monitor (right screen) - where Roblox should be")
         
         # Perform virtual drag for casting (more realistic than click-hold)
         end_x = target_x + random.randint(-5, 5)  # Slight cast variation
         end_y = target_y + random.randint(-5, 5)
         virtual_mouse.drag(target_x, target_y, end_x, end_y, actual_hold)
         
-        print("Virtual mouse casting completed!")
-        
     else:
         # Fallback to pyautogui
-        print("Using fallback pyautogui for casting")
         offset_x = random.randint(-3, 3)
         offset_y = random.randint(-3, 3)
         final_x = target_x + offset_x
@@ -324,13 +280,9 @@ def CastFishingRod(x, y, hold_seconds=0.9):
         
         smooth_move_to(final_x, final_y)
         
-        print(f"Fallback casting at ({final_x}, {final_y}) for {actual_hold:.2f}s")
-        
         pyautogui.mouseDown(final_x, final_y, button='left')
         time.sleep(actual_hold)
         pyautogui.mouseUp(final_x, final_y, button='left')
-        
-        print("Fallback casting completed!")
     
     return True
 
@@ -370,7 +322,6 @@ def Fish_On_Hook(x, y, duration=0.011):
     """
     # Validate Roblox before checking for fish
     if not validate_roblox_and_game():
-        print("Cannot check for fish - Roblox validation failed!")
         return False
     
     # load detector templates lazily
@@ -399,12 +350,9 @@ def Fish_On_Hook(x, y, duration=0.011):
     
     # Create region tuple (left, top, width, height) for screenshot
     region = (fish_region_left, fish_region_top, fish_region_width, fish_region_height)
-    print(f"Searching for fish in specific region: {region} (coordinates: {fish_region_left}, {fish_region_top} to {fish_region_right}, {fish_region_bottom})")
     
-    found, score = _match_template_in_region(generic_tpl, region, threshold=0.84)
+    found, score = _match_template_in_region(generic_tpl, region, threshold=0.7)
     if found:
-        print(f"Fish on hook detected! Score: {score}")
-        
         # Get click position - ONLY use Roblox window center
         if not WINDOW_MANAGER_AVAILABLE:
             print("ERROR: Window manager not available - cannot start minigame!")
@@ -550,7 +498,6 @@ def _match_template_in_region(template, region, threshold=0.80):
         return (max_val >= threshold), max_val
         
     except Exception as e:
-        print(f"Error in template matching: {e}")
         return False, 0.0
 
 
@@ -815,21 +762,40 @@ def detect_fish_position_image_based(screenshot_bgr):
 def detect_fish_position_color_fallback(screenshot_bgr):
     """
     Fast color-based fish detection as fallback method.
+    Handles both normal brown fish color and green hover state for basic fishing rod.
     """
     try:
-        # Use optimized color detection with smaller search area
-        # Convert AHK hex color 0x5B4B43 to BGR (OpenCV uses BGR)
-        fish_color_bgr = np.array([67, 75, 91])
-        fish_tolerance = 8  # Slightly higher tolerance for speed
+        # Use dual color detection for basic fishing rod
+        # Normal brown fish color: AHK hex color 0x5B4B43 to BGR (OpenCV uses BGR)
+        brown_fish_color = np.array([67, 75, 91])
+        brown_tolerance = 8
         
-        # Create color range for fish detection  
-        lower_fish = fish_color_bgr - fish_tolerance
-        upper_fish = fish_color_bgr + fish_tolerance
-        lower_fish = np.clip(lower_fish, 0, 255)
-        upper_fish = np.clip(upper_fish, 0, 255)
+        # Green hover state color (when white indicator hovers over fish)
+        green_fish_color = np.array([0, 180, 0])  # Bright green in BGR
+        green_tolerance = 30  # Higher tolerance for green variations
         
-        # Create mask and find contours
-        mask = cv2.inRange(screenshot_bgr, lower_fish, upper_fish)
+        # Create color ranges for both states
+        lower_brown = np.clip(brown_fish_color - brown_tolerance, 0, 255)
+        upper_brown = np.clip(brown_fish_color + brown_tolerance, 0, 255)
+        
+        lower_green = np.clip(green_fish_color - green_tolerance, 0, 255)
+        upper_green = np.clip(green_fish_color + green_tolerance, 0, 255)
+        
+        # Create masks for both colors
+        mask_brown = cv2.inRange(screenshot_bgr, lower_brown, upper_brown)
+        mask_green = cv2.inRange(screenshot_bgr, lower_green, upper_green)
+        
+        # Combine masks (detect either brown OR green)
+        mask = cv2.bitwise_or(mask_brown, mask_green)
+        
+        # Debug: Check which color was detected
+        brown_pixels = cv2.countNonZero(mask_brown)
+        green_pixels = cv2.countNonZero(mask_green)
+        
+        color_state = "normal" if brown_pixels > green_pixels else "hover" if green_pixels > 0 else "none"
+        if brown_pixels > 0 or green_pixels > 0:
+            print(f"🎣 Fish color state: {color_state} (brown:{brown_pixels}, green:{green_pixels})")
+        
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
         if not contours:
@@ -852,7 +818,6 @@ def detect_fish_position_color_fallback(screenshot_bgr):
         return max(0.0, min(1.0, fish_pos))
         
     except Exception as e:
-        print(f"Error in color fallback fish detection: {e}")
         return None
 
 
@@ -993,10 +958,14 @@ def detect_minigame_bar_presence(screenshot_bgr):
 def handle_fishing_minigame(minigame_controller):
     """
     Handle the fishing minigame by detecting the UI and making decisions.
+    Only runs after Fish_On_Hook detection - not for casting minigame.
     
     Returns True when minigame is complete, False to continue.
     """
     try:
+        # Additional validation: Only run if we're truly in fish-catching minigame
+        # (This function should only be called after Fish_On_Hook detection)
+        
         # Detect minigame elements
         elements = detect_minigame_elements()
         
@@ -1135,27 +1104,28 @@ def execute_minigame_action(decision):
                 time.sleep(counter_strafe)
                 
     except Exception as e:
-        print(f"Error executing minigame action: {e}")
+        pass
 
 
 def main_fishing_loop():
     """Main fishing automation loop."""
-    print("Starting Blox Fruits Auto Fishing...")
-    print("Press Ctrl+C to stop the script.")
     
     # Import the rod detector and minigame logic
     try:
         from BackGroud_Logic.FishingRodDetector import check_region_and_act
         from BackGroud_Logic.Fishing_MiniGame import MinigameController, MinigameConfig
     except ImportError as e:
-        print(f"Failed to import required modules: {e}")
         return
     
-    # Initialize minigame controller with AHK-style configuration
+    # Initialize minigame controller with AHK-style configuration for BASIC FISHING ROD
     minigame_config = MinigameConfig()
     
-    # Set up AHK parameters for optimal performance
-    minigame_config.control = 0.2  # Typical rod Control stat (adjust based on actual rod)
+    # Set up AHK parameters optimized for basic fishing rod
+    minigame_config.control = 0.18  # Basic fishing rod Control stat (lower than advanced rods)
+    
+    # Enhanced color detection for basic fishing rod (handles green hover state)
+    minigame_config.fish_bar_color_tolerance = 15  # Higher tolerance for dual color detection
+    minigame_config.white_bar_color_tolerance = 20  # Increased for better white indicator detection
     
     # Calculate pixel scaling based on screen resolution (AHK-style)
     if WINDOW_MANAGER_AVAILABLE:
@@ -1177,11 +1147,11 @@ def main_fishing_loop():
             minigame_config.max_left_bar = 0.15   # 15% from left edge
             minigame_config.max_right_bar = 0.85  # 85% from left edge (15% from right)
             
-            print(f"🔧 AHK Config: Fish bar width={fish_bar_width:.1f}px, Pixel scaling={minigame_config.pixel_scaling:.3f}")
+            pass
         else:
-            print("Warning: Could not get Roblox window for pixel scaling calculation")
+            pass
     else:
-        print("Warning: Window manager not available for AHK configuration")
+        pass
     
     minigame_controller = MinigameController(minigame_config)
     
@@ -1203,16 +1173,13 @@ def main_fishing_loop():
             current_time = time.time()
             if current_time - last_validation_time > validation_interval:
                 if not validate_roblox_and_game():
-                    print("Roblox validation failed. Bringing to front and retrying...")
                     if not bring_roblox_to_front():
-                        print("Failed to bring Roblox to front. Waiting 2 seconds...")
                         time.sleep(2)
                         continue
                     # Wait a moment after bringing to front
                     time.sleep(0.5)
                     # Revalidate after bringing to front
                     if not validate_roblox_and_game():
-                        print("Still unable to validate Roblox. Waiting 2 seconds...")
                         time.sleep(2)
                         continue
                 last_validation_time = current_time
@@ -1227,88 +1194,67 @@ def main_fishing_loop():
                 rod_result = check_region_and_act()
             
             if rod_result is True:  # UN (unequipped) detected and clicked
-                print("Fishing rod clicked to equip, waiting for it to equip...")
                 fishing_state = "equipping"
                 cast_attempts = 0
                 last_rod_click_time = current_time  # Record click time
                 
                 # Wait for rod to equip with periodic checks
-                print("Waiting for fishing rod to equip (checking every 0.5s)...")
                 for wait_check in range(8):  # Check up to 4 seconds
                     time.sleep(0.5)
                     # Quick check if rod is now equipped
                     temp_result = check_region_and_act()
                     if temp_result is False:  # EQ detected
-                        print(f"✓ Rod equipped successfully after {(wait_check + 1) * 0.5:.1f}s")
                         break
                     elif temp_result is None:
-                        print(f"Checking rod status... ({wait_check + 1}/8)")
+                        pass
                 else:
-                    print("Rod may still be equipping, continuing with setup...")
+                    pass
                 
-                # After rod is equipped, perform zoom sequence and center mouse
-                print("Performing post-equip setup: zoom in -> zoom out -> center mouse...")
-                
-                # Get Roblox window center for zoom operations - no fallbacks
+                # After rod is equipped, center mouse for fishing
+                # Get Roblox window center for mouse positioning
                 if not WINDOW_MANAGER_AVAILABLE:
-                    print("ERROR: Window manager not available for post-equip setup!")
                     return False
                     
                 center_x, center_y = get_roblox_coordinates()
                 if center_x is None or center_y is None:
-                    print("ERROR: Cannot get Roblox coordinates for zoom operations!")
                     return False
                 
-                # Zoom in sequence
-                print("Zooming in...")
-                Zoom_In(center_x, center_y)
-                time.sleep(0.5)  # Brief pause between zoom operations
-                
-                # Zoom out sequence  
-                print("Zooming out...")
-                Zoom_Out(center_x, center_y)
-                time.sleep(0.5)  # Brief pause after zoom out
-                
                 # Move mouse to center of Roblox window/screen
-                print(f"Centering mouse at ({center_x}, {center_y})...")
                 if VIRTUAL_MOUSE_AVAILABLE and virtual_mouse is not None:
                     virtual_mouse.smooth_move_to(center_x, center_y)
                 else:
                     smooth_move_to(center_x, center_y)
                 
-                print("Post-equip setup completed! Ready to fish.")
                 time.sleep(0.5)  # Brief pause before continuing
                 
             elif rod_result is False:  # EQ (equipped) detected - rod is ready
-                print(f"✓ EQ rod detected! Current state: {fishing_state}")
                 if fishing_state == "waiting" or fishing_state == "equipping":
-                    print("→ Transitioning to casting state")
                     fishing_state = "casting"
                     cast_attempts = 0
                 else:
-                    print(f"→ Already in {fishing_state} state")
+                    pass
                     
             elif rod_result is None:  # No clear detection or error
-                print(f"No clear rod detection (state: {fishing_state})")
                 # Continue with current state but add small delay
                 time.sleep(0.2)
                 
             if fishing_state == "casting":
-                print(f"Casting fishing rod (attempt {cast_attempts + 1}/{max_cast_attempts})...")
+                # Get Roblox window center for casting
+                center_x, center_y = get_roblox_coordinates()
+                if center_x is None or center_y is None:
+                    # Fallback to screen center
+                    screen_w, screen_h = pyautogui.size()
+                    center_x, center_y = screen_w // 2, screen_h // 2
                 
-                # Zoom in for better accuracy
-                screen_w, screen_h = pyautogui.size()
-                Zoom_In(screen_w // 2, screen_h // 2)
-                time.sleep(0.5)
+                # Cast the rod at center position
+                print(f"🎣 Casting fishing rod...")
+                CastFishingRod(center_x, center_y - 20)
+                time.sleep(2.0)  # Wait longer for casting minigame to fully disappear
                 
-                # Cast the rod
-                CastFishingRod(screen_w // 2, screen_h // 2 - 20)
-                time.sleep(0.5)  # Minimal wait for cast to register
-                
+                print(f"🔎 Entering hooking state - waiting for fish...")
                 fishing_state = "hooking"
                 cast_start_time = time.time()  # Record when we start waiting for fish
                 cast_attempts += 1
-                print(f"Started waiting for fish at {cast_start_time:.1f} (30s timeout)")
                 
             elif fishing_state == "hooking":
                 # Check for 30-second timeout (Roblox thinks clicking too fast)
@@ -1317,26 +1263,22 @@ def main_fishing_loop():
                 time_remaining = fishing_timeout - time_waiting
                 
                 if time_waiting >= fishing_timeout:
-                    print(f"⏰ TIMEOUT: No fish after {time_waiting:.1f}s - Roblox may think we're clicking too fast!")
-                    print("🔄 Unequipping and re-equipping fishing rod to reset state...")
                     fishing_state = "waiting"  # This will trigger rod detection and re-equipping
                     cast_attempts = 0
                     time.sleep(0.2)  # Brief pause before restarting
                     continue
                 
-                # Show countdown every 5 seconds
-                if int(time_waiting) % 5 == 0 and int(time_waiting) > 0:
-                    print(f"🎣 Waiting for fish to bite... ({time_remaining:.0f}s remaining)")
-                else:
-                    print("🎣 Waiting for fish to bite...")
-                
                 # Check for fish on hook
                 hook_result = Fish_On_Hook(0, 0)  # Coordinates not used in current implementation
                 
                 if hook_result:
-                    print("🐟 Fish detected! Starting minigame...")
+                    print(f"🐟 FISH ON HOOK DETECTED! Starting minigame... (hook_result: {hook_result})")
                     fishing_state = "minigame"
                     minigame_start_time = time.time()
+                else:
+                    # Debug: Show we're still waiting for fish (but don't spam)
+                    if int(current_time) % 5 == 0 and abs(current_time - int(current_time)) < 0.1:
+                        print(f"⏳ Waiting for fish... ({time_remaining:.1f}s remaining)")
                 
                 # Use fishing ability if available
                 Use_Ability_Fishing(0, 0)
@@ -1346,45 +1288,28 @@ def main_fishing_loop():
                 
                 # Fallback timeout after max cast attempts
                 if cast_attempts >= max_cast_attempts:
-                    print("Max cast attempts reached, resetting...")
                     fishing_state = "waiting"
                     cast_attempts = 0
-                    # Zoom out
-                    screen_w, screen_h = pyautogui.size()
-                    Zoom_Out(screen_w // 2, screen_h // 2)
                 
             elif fishing_state == "minigame":
                 # Handle the fishing minigame
                 minigame_result = handle_fishing_minigame(minigame_controller)
                 
                 if minigame_result or (time.time() - minigame_start_time) > 15:  # 15 second timeout
-                    print("Fishing cycle complete, resetting...")
+                    print("Minigame done! Fishing cycle complete, resetting...")
                     fishing_state = "waiting"
                     cast_attempts = 0
-                    
-                    # Zoom out after fishing
-                    screen_w, screen_h = pyautogui.size()
-                    Zoom_Out(screen_w // 2, screen_h // 2)
                     time.sleep(0.2)  # Brief pause before next cycle
                 
             # Small delay between iterations
             time.sleep(0.1)
             
     except KeyboardInterrupt:
-        print("\nStopping auto fishing...")
+        pass
     except Exception as e:
-        import traceback
-        print(f"Error in fishing loop: {e}")
-        print("Full traceback:")
-        traceback.print_exc()
+        pass
     finally:
-        # Zoom out when exiting
-        try:
-            screen_w, screen_h = pyautogui.size()
-            Zoom_Out(screen_w // 2, screen_h // 2)
-        except:
-            pass
-        print("Auto fishing stopped.")
+        pass
 
 
 if __name__ == "__main__":
