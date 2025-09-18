@@ -53,7 +53,7 @@ class MinigameConfig:
     white_bar_half_width: float = 0.02
 
     # Scanning delay (used by callers, returned for reference) - from AHK: 10ms
-    scan_delay: float = 0.01  # 10ms converted to seconds
+    scan_delay: float = 0.001  # 1ms converted to seconds
     
     # Dynamic fish center position (can be updated during minigame)
     fish_center: float = 0.5  # Default to center, updated by detection
@@ -63,20 +63,20 @@ class MinigameConfig:
     side_delay: float = 0.4  # 400ms converted to seconds
 
     # Stability multipliers/divisions (from AHK script - exact values)
-    stable_right_multiplier: float = 2.36
-    stable_right_division: float = 1.55
+    stable_right_multiplier: float = 2.40
+    stable_right_division: float = 1.60
     stable_left_multiplier: float = 1.1
     stable_left_division: float = 1.12
 
-    # Unstable multipliers/divisions (from AHK script - exact values)
-    unstable_right_multiplier: float = 2.665
-    unstable_right_division: float = 1.5
-    unstable_left_multiplier: float = 2.19
-    unstable_left_division: float = 1.0
+    # Unstable multipliers/divisions (simplified for easier fish game)
+    unstable_right_multiplier: float = 1.8
+    unstable_right_division: float = 1.3
+    unstable_left_multiplier: float = 1.6
+    unstable_left_division: float = 1.2
 
     # Ankle-break multipliers (from AHK script - exact values)
-    right_ankle_break_multiplier: float = 0.75
-    left_ankle_break_multiplier: float = 0.45
+    right_ankle_break_multiplier: float = 0.40
+    left_ankle_break_multiplier: float = 0.10
 
     # Pixel scaling and deadzone calculations (calculated dynamically)
     pixel_scaling: float = 1.0  # will be calculated based on bar width
@@ -143,7 +143,7 @@ class MinigameController:
             # Indicator is at extreme left - force right movement  
             return {
                 "action": "move_right", 
-                "intensity": 1.0, 
+                "intensity": 1.1, 
                 "note": "max_right_boundary",
                 "action_type": 4,
                 "duration_factor": self.cfg.side_delay
@@ -152,7 +152,7 @@ class MinigameController:
             # Indicator is at extreme right - force left movement
             return {
                 "action": "move_left", 
-                "intensity": 1.0, 
+                "intensity": 0.9, 
                 "note": "max_left_boundary", 
                 "action_type": 3,
                 "duration_factor": self.cfg.side_delay
@@ -160,13 +160,13 @@ class MinigameController:
         
         # Normal tracking logic based on deadzone thresholds
         if abs(direction) <= self.cfg.deadzone:
-            # AHK Action 0: Stabilize - small correction
+            # AHK Action 0: Stabilize - small correction at 5.537 CPS
             return {
                 "action": "stabilize",
                 "intensity": 0.1,
                 "note": "stabilizing",
                 "action_type": 0,
-                "duration_factor": 0.01  # Very short click
+                "duration_factor": 0.1806  # 5.537 CPS (31 clicks / 5.598542 seconds)
             }
             
         elif self.cfg.deadzone < abs(direction) <= self.cfg.deadzone2:

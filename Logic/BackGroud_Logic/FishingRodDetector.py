@@ -337,7 +337,7 @@ def safe_load_template(path):
     return None
 
 try:
-    FISH_ON_HOOK_TPL = safe_load_template(IMAGES_DIR / 'Fish_On_Hook.png')
+    FISH_ON_HOOK_TPL = safe_load_template(IMAGES_DIR / 'Fish_On_Hook.jpg')
     FISH_LEFT_TPL = safe_load_template(IMAGES_DIR / 'Fish_Left.png')
     FISH_RIGHT_TPL = safe_load_template(IMAGES_DIR / 'Fish_Right.png')
     SHIFT_LOCK_TPL = safe_load_template(IMAGES_DIR / 'Shift_Lock.png')

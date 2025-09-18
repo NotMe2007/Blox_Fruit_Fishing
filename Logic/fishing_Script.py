@@ -456,7 +456,7 @@ def safe_load_template(path):
 try:
     POWER_MAX_TPL = safe_load_template(IMAGES_DIR / 'Power_Max.png')
     POWER_ACTIVE_TPL = safe_load_template(IMAGES_DIR / 'Power_Active.png')
-    FISH_ON_HOOK_TPL = safe_load_template(IMAGES_DIR / 'Fish_On_Hook.png')
+    FISH_ON_HOOK_TPL = safe_load_template(IMAGES_DIR / 'Fish_On_Hook.jpg')
     FISH_LEFT_TPL = safe_load_template(IMAGES_DIR / 'Fish_Left.png')
     FISH_RIGHT_TPL = safe_load_template(IMAGES_DIR / 'Fish_Right.png')
     SHIFT_LOCK_TPL = safe_load_template(IMAGES_DIR / 'Shift_Lock.png')
@@ -662,7 +662,7 @@ def Use_Ability_Fishing(x, y, duration=0.011):
 def detect_minigame_elements():
     """
     Detect minigame UI elements using image-based detection in specific region.
-    Minigame bar spawns at coordinates (489, 774) to (1413, 873).
+    Minigame bar spawns at coordinates (510, 794) to (1418, 855).
     
     Returns dict with:
     - indicator_pos: float 0.0-1.0 (normalized position of white indicator)
@@ -671,10 +671,10 @@ def detect_minigame_elements():
     """
     try:
         # Specific minigame bar coordinates (provided by user)
-        minigame_left = 489
-        minigame_top = 774
-        minigame_right = 1413
-        minigame_bottom = 873
+        minigame_left = 510
+        minigame_top = 794
+        minigame_right = 1418
+        minigame_bottom = 855
         minigame_width = minigame_right - minigame_left
         minigame_height = minigame_bottom - minigame_top
         
@@ -882,12 +882,12 @@ def detect_white_indicator_image_based(screenshot_bgr):
 
 def detect_minigame_bar_presence(screenshot_bgr):
     """
-    Detect minigame bar presence using template matching with MiniGame_Bar.png.
-    Fallback to edge detection if template is not available.
+    Detect minigame bar presence using template matching with MiniGame_Bar.png only.
+    No pixel scanning fallbacks - pure image-based detection.
     Returns True if minigame bar is detected, False otherwise.
     """
     try:
-        # Primary method: Template matching with MiniGame_Bar.png
+        # Only use template matching with MiniGame_Bar.png
         if MINIGAME_BAR_TPL is not None:
             # Convert screenshot to grayscale for template matching
             gray = cv2.cvtColor(screenshot_bgr, cv2.COLOR_BGR2GRAY)
@@ -903,52 +903,10 @@ def detect_minigame_bar_presence(screenshot_bgr):
                 return True
             else:
                 print(f"Minigame bar template match below threshold (confidence: {max_val:.3f})")
+                return False
         else:
-            print("Warning: MiniGame_Bar.png template not loaded, using fallback detection")
-        
-        # Fallback method: Edge detection and shape analysis
-        gray = cv2.cvtColor(screenshot_bgr, cv2.COLOR_BGR2GRAY)
-        
-        # Apply Gaussian blur to reduce noise
-        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-        
-        # Edge detection with optimized parameters
-        edges = cv2.Canny(blurred, 50, 150)
-        
-        # Look for horizontal lines (characteristic of minigame bar)
-        # Use HoughLinesP for faster line detection
-        lines = cv2.HoughLinesP(edges, 1, np.pi/180, threshold=50, minLineLength=100, maxLineGap=10)
-        
-        if lines is not None:
-            # Count horizontal lines (minigame bar has distinct horizontal edges)
-            horizontal_lines = 0
-            for line in lines:
-                x1, y1, x2, y2 = line[0]
-                # Check if line is roughly horizontal
-                angle = np.arctan2(abs(y2 - y1), abs(x2 - x1)) * 180 / np.pi
-                if angle < 15:  # Within 15 degrees of horizontal
-                    horizontal_lines += 1
-                    
-            # If we found multiple horizontal lines, likely a minigame bar
-            if horizontal_lines >= 2:
-                print(f"Minigame bar detected using fallback edge detection ({horizontal_lines} horizontal lines)")
-                return True
-        
-        # Fallback: check for rectangular shapes (bar outline)
-        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        for contour in contours:
-            # Approximate contour to polygon
-            epsilon = 0.02 * cv2.arcLength(contour, True)
-            approx = cv2.approxPolyDP(contour, epsilon, True)
-            
-            # Check if it's roughly rectangular (4-6 vertices)
-            if len(approx) >= 4 and len(approx) <= 6:
-                area = cv2.contourArea(contour)
-                if area > 1000:  # Large enough to be a minigame bar
-                    print("Minigame bar detected using fallback contour analysis")
-                    return True
-        
-        return False
+            print("Warning: MiniGame_Bar.png template not loaded - minigame detection unavailable")
+            return False
         
     except Exception as e:
         print(f"Error detecting minigame bar presence: {e}")
