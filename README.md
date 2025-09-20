@@ -8,7 +8,7 @@ If you use the macro it WILL NOT WORK CORRECTLY IF YOU USE FAST MODE!!!
 
 ## Features
 
-Note out yet still working on the project fishing ~70% done today
+Note out yet still working on the project, fishing ~90% done today
 
 ## Upcoming Features
 
