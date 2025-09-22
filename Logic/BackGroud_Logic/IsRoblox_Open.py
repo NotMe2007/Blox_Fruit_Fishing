@@ -456,11 +456,21 @@ class RobloxChecker:
             Tuple[bool, Optional[str], Optional[int]]: (is_blox_fruits, game_name, game_id)
         """
         try:
-            if self.debug:
+            # Check if we have a recent cached result to avoid spam
+            cache_key = "game_detection"
+            current_time = time.time()
+            if cache_key in self.api_cache:
+                cached_result, cache_time = self.api_cache[cache_key]
+                if current_time - cache_time < 15.0:  # Use cache for 15 seconds
+                    if self.debug and int(current_time) % 10 == 0:  # Only print occasionally
+                        print("DEBUG: Using cached game detection result")
+                    return cached_result
+            
+            if self.debug and int(current_time) % 30 == 0:  # Only print every 30 seconds
                 print("DEBUG: Starting comprehensive game detection...")
             
             # Method 1: Try to get game ID from Roblox process command line  
-            if self.debug:
+            if self.debug and int(current_time) % 30 == 0:  # Reduce debug spam
                 print("DEBUG: Checking process command line...")
             process_info = self.get_roblox_process_info()
             if process_info and 'game_id' in process_info:
@@ -469,7 +479,9 @@ class RobloxChecker:
                 
                 # Check if it's a known Blox Fruits game ID
                 if self.is_blox_fruits_game_id(game_id):
-                    return True, "Blox Fruits", game_id
+                    result = (True, "Blox Fruits", game_id)
+                    self.api_cache[cache_key] = (result, current_time)
+                    return result
                 
                 # Get game info from API
                 game_info = self.get_game_info_from_api(game_id)
@@ -478,14 +490,25 @@ class RobloxChecker:
                     is_blox_fruits = any(keyword.lower() in game_name.lower() 
                                        for keyword in self.blox_fruits_keywords)
                     return is_blox_fruits, game_name, game_id
+                else:
+                    # API failed - check if this is a known Blox Fruits ID anyway
+                    if self.is_blox_fruits_game_id(game_id):
+                        print(f"✅ API failed but {game_id} is known Blox Fruits ID - assuming Blox Fruits")
+                        result = (True, "Blox Fruits (Known ID)", game_id)
+                        self.api_cache[cache_key] = (result, current_time)
+                        return result
+                    else:
+                        print(f"⚠️ API failed for unknown game ID {game_id} - continuing detection...")
             
             # Method 2: Check window title for patterns and game ID
-            print("DEBUG: Checking window titles...")
+            if self.debug and int(current_time) % 30 == 0:  # Reduce debug spam
+                print("DEBUG: Checking window titles...")
             window_title = self.get_roblox_window_title()
             
             # If no window found with basic method, try aggressive search
             if not window_title:
-                print("DEBUG: No window found with basic method, trying aggressive search...")
+                if self.debug and int(current_time) % 30 == 0:  # Reduce debug spam
+                    print("DEBUG: No window found with basic method, trying aggressive search...")
                 window_title = self.find_active_roblox_window()
             
             if window_title:
@@ -515,6 +538,9 @@ class RobloxChecker:
                         is_blox_fruits = any(keyword.lower() in game_name.lower() 
                                            for keyword in self.blox_fruits_keywords)
                         return is_blox_fruits, game_name, game_id
+                    else:
+                        # API failed - for unknown game IDs, continue to other detection methods
+                        print(f"⚠️ API failed for game ID {game_id} from window title - continuing detection...")
             
             # Method 3: If no game ID found, try API search based on window title
             if window_title:
@@ -532,25 +558,22 @@ class RobloxChecker:
             
             # Method 4: Fallback - if we have a "Roblox" window, assume it might be Blox Fruits
             if window_title and window_title.lower().strip() == 'roblox':
-                print("DEBUG: Found generic 'Roblox' window - checking if it could be Blox Fruits...")
-                # Try all known Blox Fruits game IDs
-                for bf_game_id in self.blox_fruits_game_ids:
-                    game_info = self.get_game_info_from_api(bf_game_id)
-                    if game_info:
-                        print(f"DEBUG: Assuming Blox Fruits (ID: {bf_game_id}) for generic Roblox window")
-                        return True, "Blox Fruits", bf_game_id
-                
-                # If API fails, still assume it might be Blox Fruits
-                print("DEBUG: API failed but assuming Blox Fruits for generic window")
-                return True, "Blox Fruits (Assumed)", 2753915549
+                print("DEBUG: Found generic 'Roblox' window - assuming Blox Fruits (skipping API due to update)")
+                # Skip API calls since they're failing after Roblox update - just assume it's Blox Fruits
+                result = (True, "Blox Fruits (Generic Window)", 2753915549)
+                self.api_cache[cache_key] = (result, current_time)
+                return result
             
             # Method 5: Return window title info even if not Blox Fruits
             if window_title and window_title not in ['MSCTFIME UI']:
                 print(f"Detected non-Blox Fruits game: {window_title}")
                 return False, window_title, None
             
-            print("DEBUG: No game detected")
-            return False, None, None
+            if self.debug and int(current_time) % 30 == 0:  # Reduce debug spam
+                print("DEBUG: No game detected")
+            result = (False, None, None)
+            self.api_cache[cache_key] = (result, current_time)
+            return result
             
         except Exception as e:
             print(f"Error in comprehensive game detection: {e}")

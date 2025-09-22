@@ -318,7 +318,7 @@ def check_region_and_act():
 
     if (best_eq_loc is not None and best_eq_size is not None and 
         best_eq_val_scalar >= threshold and best_eq_val_scalar > best_un_val_scalar):
-        print(f'EQ detected in region - Ending script (score={best_eq_val_scalar:.3f})')
+        print(f'EQ detected in region - rod is equipped (score={best_eq_val_scalar:.3f})')
         return False
 
     print('No UN or EQ detected in the region')
@@ -329,11 +329,15 @@ def check_region_and_act():
 def safe_load_template(path):
     """Safely load a template image, handling both None and empty array cases."""
     try:
-        img = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
+        # Load as color image to match screenshot format
+        img = cv2.imread(str(path), cv2.IMREAD_COLOR)
         if img is not None and img.size > 0:
+            # Only print on first load - this should only happen once
             return img
-    except Exception:
-        pass
+        else:
+            print(f"❌ Template failed to load: {path.name}")
+    except Exception as e:
+        print(f"❌ Template loading error: {path.name} - {e}")
     return None
 
 try:

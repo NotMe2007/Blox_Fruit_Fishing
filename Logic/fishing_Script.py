@@ -162,38 +162,55 @@ def bring_roblox_to_front():
 
 
 def validate_roblox_and_game():
-    """Check if Roblox is running, in foreground, and playing Blox Fruits."""
+    """Check if Roblox is running, in foreground, and playing Blox Fruits.
+    Enhanced for Roblox update - more forgiving when API endpoints fail.
+    """
     try:
         # Import the Roblox checker
         from BackGroud_Logic.IsRoblox_Open import RobloxChecker
         
         checker = RobloxChecker()
         
-        # Check if Roblox is running and in Blox Fruits
+        # Check if Roblox is running
         if not checker.is_roblox_running():
             print("ERROR: Roblox is not running!")
             return False
         
-        game_result = checker.detect_game_via_api()
-        if isinstance(game_result, tuple):
-            is_blox, game_name, _ = game_result
-            if not is_blox:
-                return False
-        else:
-            return False
+        # Try API detection, but allow graceful fallback if APIs fail (Roblox update issue)
+        try:
+            game_result = checker.detect_game_via_api()
+            if isinstance(game_result, tuple):
+                is_blox, game_name, _ = game_result
+                if is_blox:
+                    print(f"✅ Confirmed Blox Fruits via API: {game_name}")
+                    return True
+                else:
+                    print(f"⚠️ API says not Blox Fruits: {game_name}")
+                    # Continue to fallback validation
+            else:
+                print("⚠️ API detection failed - using fallback validation")
+        except Exception as api_error:
+            print(f"⚠️ API detection error: {api_error} - using fallback validation")
         
-        # Check if Roblox window is in foreground
+        # Fallback validation: Just check if Roblox window exists and is focused
+        # This is more lenient for when Roblox updates break API detection
         foreground_hwnd = win32gui.GetForegroundWindow()
         foreground_title = win32gui.GetWindowText(foreground_hwnd).lower()
         
-        if 'roblox' not in foreground_title:
+        if 'roblox' in foreground_title:
+            print("✅ Roblox window detected and focused - assuming Blox Fruits (API fallback)")
+            return True
+        else:
+            print("❌ Roblox window not in foreground")
             return False
         
-        return True
-        
     except Exception as e:
+        print(f"❌ Validation error: {e}")
         return False
 
+
+# Cache for detector module to prevent reloading
+_detector_module_cache = None
 
 def get_detector_module():
     """Lazily load the FishingRodDetector module.
@@ -201,6 +218,10 @@ def get_detector_module():
     Returns the loaded module. Raises RuntimeError if the detector cannot be found
     or loaded. This avoids printing or exiting during import-time of this module.
     """
+    global _detector_module_cache
+    if _detector_module_cache is not None:
+        return _detector_module_cache
+        
     detector_path = Path(__file__).resolve().parent / 'BackGroud_Logic' / 'FishingRodDetector.py'
     if not detector_path.exists():
         # Try alternative locations
@@ -224,6 +245,7 @@ def get_detector_module():
     except Exception as e:
         raise RuntimeError(f"failed to load detector module: {e}")
 
+    _detector_module_cache = module
     return module
 
 
@@ -310,15 +332,106 @@ def Zoom_Out(x, y, duration=0.05):
         pyautogui.press('o')
         time.sleep(duration)  # Delay for Roblox key registration
 
+def _match_template_multi_scale(template, region, threshold=0.7):
+    """
+    Enhanced template matching with multiple scales for Roblox update compatibility.
+    Tests different scales to handle UI size changes.
+    """
+    try:
+        # Validate template before processing
+        if template is None or template.size == 0:
+            print("Error: Template is None or empty")
+            return False, 0.0
+        
+        # Ensure template is in the correct format (BGR, 8-bit)
+        if len(template.shape) == 3 and template.shape[2] == 3:
+            # Template is already 3-channel BGR
+            template_processed = template.astype(np.uint8)
+        elif len(template.shape) == 3 and template.shape[2] == 4:
+            # Template is 4-channel (BGRA), convert to BGR
+            template_processed = cv2.cvtColor(template, cv2.COLOR_BGRA2BGR).astype(np.uint8)
+        elif len(template.shape) == 2:
+            # Template is grayscale, convert to BGR
+            template_processed = cv2.cvtColor(template, cv2.COLOR_GRAY2BGR).astype(np.uint8)
+        else:
+            print(f"Error: Unexpected template shape: {template.shape}")
+            return False, 0.0
+        
+        # Take screenshot of the region
+        screenshot = pyautogui.screenshot(region=region)
+        screenshot_cv = cv2.cvtColor(np.array(screenshot), cv2.COLOR_RGB2BGR).astype(np.uint8)
+        
+        # Template matching with multiple scales for robustness
+        scales = [0.8, 0.9, 1.0, 1.1, 1.2]  # Try different scales
+        best_score = 0
+        
+        for scale in scales:
+            # Resize template
+            height, width = template_processed.shape[:2]
+            new_width = int(width * scale)
+            new_height = int(height * scale)
+            
+            if new_width < 10 or new_height < 10:  # Skip very small templates
+                continue
+            
+            if new_width > screenshot_cv.shape[1] or new_height > screenshot_cv.shape[0]:
+                # Skip templates larger than screenshot
+                continue
+                
+            scaled_template = cv2.resize(template_processed, (new_width, new_height))
+            
+            # Ensure both images have the same data type
+            if screenshot_cv.dtype != scaled_template.dtype:
+                scaled_template = scaled_template.astype(screenshot_cv.dtype)
+            
+            # Perform template matching
+            result = cv2.matchTemplate(screenshot_cv, scaled_template, cv2.TM_CCOEFF_NORMED)
+            min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
+            
+            if max_val > best_score:
+                best_score = max_val
+            
+            if max_val >= threshold:
+                print(f"🐟 FISH ON HOOK DETECTED! (confidence: {max_val:.3f}, scale: {scale})")
+                return True, max_val
+        
+        # If we get here, no match at any scale
+        if best_score > 0.5:  # Show near-misses for debugging
+            print(f"🔍 Fish detection near-miss (best: {best_score:.3f}, threshold: {threshold})")
+        
+        return False, best_score
+        
+    except Exception as e:
+        print(f"Error in multi-scale Fish_On_Hook detection: {e}")
+        print(f"Template shape: {template.shape if template is not None else 'None'}")
+        print(f"Template dtype: {template.dtype if template is not None else 'None'}")
+        return False, 0.0
+
+def _fish_on_hook_fallback():
+    """
+    Fallback detection method using alternative approaches.
+    For use when template matching fails after Roblox updates.
+    """
+    try:
+        # This is a placeholder for alternative detection methods
+        # You might need to add specific color detection or OCR here
+        # based on what the new Fish_On_Hook indicator looks like
+        
+        # For now, return False to prevent false positives
+        # TODO: Implement color-based or OCR-based detection if needed
+        return False
+        
+    except Exception as e:
+        print(f"Error in fallback Fish_On_Hook detection: {e}")
+        return False
+
 def Fish_On_Hook(x, y, duration=0.011):
     """Detect the fish-on-hook indicator and click the current mouse position.
+    
+    Enhanced with multi-scale template matching and fallback detection
+    for Roblox update compatibility.
 
-    Detects whether the fish indicator corresponds to a left- or right-moving
-    fish by matching against `Fish_Left.png` and `Fish_Right.png`.
-
-    Returns the direction string 'left' or 'right' when a click was performed,
-    or None when nothing was detected. (Previous callers expecting a boolean
-    should treat non-None as True.)
+    Returns True when fish detected and minigame started, False otherwise.
     """
     # Validate Roblox before checking for fish
     if not validate_roblox_and_game():
@@ -335,23 +448,51 @@ def Fish_On_Hook(x, y, duration=0.011):
         generic_tpl = globals().get('FISH_ON_HOOK_TPL')
     
     if generic_tpl is None or (hasattr(generic_tpl, 'size') and generic_tpl.size == 0):
-        return False
+        print("Warning: Fish_On_Hook template not loaded, using fallback detection")
+        return _fish_on_hook_fallback()
 
     # Get screen dimensions for fallback clicking
     screen_w, screen_h = pyautogui.size()
     
-    # Use specific fish on hook detection region: (873, 351) to (1037, 470)
-    fish_region_left = 873
-    fish_region_top = 351  
-    fish_region_right = 1037
-    fish_region_bottom = 470
+    # Use broader fish on hook detection region - covers center area where indicator appears
+    # Based on 1920x1080 resolution, fish indicator typically appears in center-upper area
+    fish_region_left = 600
+    fish_region_top = 200  
+    fish_region_right = 1320
+    fish_region_bottom = 500
     fish_region_width = fish_region_right - fish_region_left
     fish_region_height = fish_region_bottom - fish_region_top
     
     # Create region tuple (left, top, width, height) for screenshot
     region = (fish_region_left, fish_region_top, fish_region_width, fish_region_height)
     
-    found, score = _match_template_in_region(generic_tpl, region, threshold=0.7)
+    # Enhanced multi-scale template matching for Roblox update compatibility
+    # Lower threshold for better detection of new fish indicator
+    found, score = _match_template_multi_scale(generic_tpl, region, threshold=0.6)
+    
+    # Save debug screenshot of detection region for template creation help (every 5 seconds)
+    global _last_debug_screenshot_time
+    if '_last_debug_screenshot_time' not in globals():
+        _last_debug_screenshot_time = 0
+    
+    if time.time() - _last_debug_screenshot_time > 5.0:
+        try:
+            debug_screenshot = pyautogui.screenshot(region=region)
+            debug_screenshot.save("fish_detection_region_debug.png")
+            print(f"🔍 Fish detection region saved as: fish_detection_region_debug.png (score: {score:.3f})")
+            _last_debug_screenshot_time = time.time()
+        except Exception as e:
+            print(f"Debug screenshot failed: {e}")
+    
+    # If multi-scale fails, try original single-scale method as fallback
+    if not found and score == 0.0:
+        print("Multi-scale detection failed, trying original method...")
+        try:
+            found, score = _match_template_in_region(generic_tpl, region, threshold=0.6)
+        except Exception as e:
+            print(f"Original template matching also failed: {e}")
+            return _fish_on_hook_fallback()
+    
     if found:
         # Get click position - ONLY use Roblox window center
         if not WINDOW_MANAGER_AVAILABLE:
@@ -446,11 +587,19 @@ POWER_ACTIVE_TPL = None
 def safe_load_template(path):
     """Safely load a template image, handling both None and empty array cases."""
     try:
-        img = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
+        # Load as color image to match screenshot format
+        img = cv2.imread(str(path), cv2.IMREAD_COLOR)
         if img is not None and img.size > 0:
+            # Only print template info if it's unusually large (potential issue)
+            if img.shape[0] > 200 or img.shape[1] > 200:
+                print(f"⚠️ Large template: {path.name} (shape: {img.shape}) - consider resizing for better performance")
+            else:
+                print(f"✅ Template loaded: {path.name} (shape: {img.shape})")
             return img
-    except Exception:
-        pass
+        else:
+            print(f"❌ Template failed to load: {path.name}")
+    except Exception as e:
+        print(f"❌ Template loading error: {path.name} - {e}")
     return None
 
 try:
@@ -1121,9 +1270,9 @@ def main_fishing_loop():
     last_rod_click_time = 0  # Track when we last clicked the rod
     rod_click_cooldown = 3.0  # Wait 3 seconds before clicking rod again
     last_validation_time = 0  # Track when we last validated Roblox
-    validation_interval = 5.0  # Only validate every 5 seconds to reduce spam
+    validation_interval = 10.0  # Only validate every 10 seconds to reduce spam (extended for Roblox update)
     cast_start_time = 0  # Track when we started waiting for fish
-    fishing_timeout = 30.0  # 30 seconds timeout for fish to bite
+    fishing_timeout = 60.0  # 60 seconds timeout for fish to bite (extended for Roblox update)
     
     try:
         while True:
@@ -1142,14 +1291,18 @@ def main_fishing_loop():
                         continue
                 last_validation_time = current_time
             
-            # Check for fishing rod state (with cooldown to prevent spam clicking)
+            # Check for fishing rod state only when in waiting/equipping state (with cooldown to prevent spam clicking)
             current_time = time.time()
-            if current_time - last_rod_click_time < rod_click_cooldown:
-                # Still in cooldown period, skip rod detection
-                time.sleep(0.1)
-                rod_result = None
+            if fishing_state in ["waiting", "equipping"]:
+                if current_time - last_rod_click_time < rod_click_cooldown:
+                    # Still in cooldown period, skip rod detection
+                    time.sleep(0.1)
+                    rod_result = None
+                else:
+                    rod_result = check_region_and_act()
             else:
-                rod_result = check_region_and_act()
+                # Skip rod detection when casting/hooking/minigame
+                rod_result = None
             
             if rod_result is True:  # UN (unequipped) detected and clicked
                 fishing_state = "equipping"
@@ -1171,11 +1324,15 @@ def main_fishing_loop():
                 # After rod is equipped, center mouse for fishing
                 # Get Roblox window center for mouse positioning
                 if not WINDOW_MANAGER_AVAILABLE:
-                    return False
+                    print("ERROR: Window manager not available - waiting...")
+                    time.sleep(2)
+                    continue
                     
                 center_x, center_y = get_roblox_coordinates()
                 if center_x is None or center_y is None:
-                    return False
+                    print("ERROR: Cannot get Roblox coordinates - waiting...")
+                    time.sleep(2)
+                    continue
                 
                 # Move mouse to center of Roblox window/screen
                 if VIRTUAL_MOUSE_AVAILABLE and virtual_mouse is not None:
@@ -1215,16 +1372,27 @@ def main_fishing_loop():
                 cast_attempts += 1
                 
             elif fishing_state == "hooking":
-                # Check for 30-second timeout (Roblox thinks clicking too fast)
+                # Check for 60-second timeout (extended for Roblox update compatibility)
                 current_time = time.time()
                 time_waiting = current_time - cast_start_time
                 time_remaining = fishing_timeout - time_waiting
                 
                 if time_waiting >= fishing_timeout:
+                    print(f"⏰ Hooking timeout reached ({fishing_timeout}s), resetting to waiting...")
                     fishing_state = "waiting"  # This will trigger rod detection and re-equipping
                     cast_attempts = 0
                     time.sleep(0.2)  # Brief pause before restarting
                     continue
+                
+                # Save debug screenshot every 10 seconds for Roblox update analysis
+                if int(time_waiting) % 10 == 0 and abs(time_waiting - int(time_waiting)) < 0.5:
+                    try:
+                        debug_screenshot = pyautogui.screenshot()
+                        debug_path = f"debug_roblox_update_{int(current_time)}.png"
+                        debug_screenshot.save(debug_path)
+                        print(f"📸 Debug screenshot saved: {debug_path}")
+                    except Exception as e:
+                        print(f"Debug screenshot failed: {e}")
                 
                 # Check for fish on hook
                 hook_result = Fish_On_Hook(0, 0)  # Coordinates not used in current implementation
