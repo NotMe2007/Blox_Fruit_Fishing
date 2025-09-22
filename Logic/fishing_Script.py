@@ -139,11 +139,13 @@ def CastFishingRod(x, y, hold_seconds=0.93):
     if VIRTUAL_MOUSE_AVAILABLE and virtual_mouse is not None:
         # Move to casting position with virtual mouse (instant - no delays needed)
         virtual_mouse.move_to(target_x, target_y)
+        time.sleep(0.1)  # Brief delay after move
         
-        # Perform virtual drag for casting (more realistic than click-hold)
-        end_x = target_x + random.randint(-5, 5)  # Slight cast variation
-        end_y = target_y + random.randint(-5, 5)
-        virtual_mouse.drag(target_x, target_y, end_x, end_y, actual_hold)
+        # Use separate mouse_down/mouse_up for proper casting hold
+        # This is the bypass method that avoids detection
+        virtual_mouse.mouse_down(target_x, target_y, 'left')  # Press down
+        time.sleep(actual_hold)  # Hold for the full duration (~0.9s)
+        virtual_mouse.mouse_up(target_x, target_y, 'left')    # Release
         
     else:
         # Fallback to pyautogui
@@ -259,18 +261,133 @@ def _match_template_multi_scale(template, region, threshold=0.7):
         print(f"Template dtype: {template.dtype if template is not None else 'None'}")
         return False, 0.0
 
+def _detect_exclamation_indicator(region):
+    """
+    Detect the exclamation mark "!" that appears when fish is on hook.
+    Uses color analysis and shape detection instead of template matching.
+    
+    Returns: (found: bool, confidence: float)
+    """
+    try:
+        # Take screenshot of the fish detection region
+        screenshot = pyautogui.screenshot(region=region)
+        screenshot_np = np.array(screenshot)
+        screenshot_bgr = cv2.cvtColor(screenshot_np, cv2.COLOR_RGB2BGR)
+        
+        # Convert to HSV for better color detection
+        hsv = cv2.cvtColor(screenshot_bgr, cv2.COLOR_BGR2HSV)
+        
+        # Method 1: Look for white/bright exclamation marks
+        # White range in HSV
+        white_lower = np.array([0, 0, 180])    # Very bright
+        white_upper = np.array([180, 50, 255]) # Low saturation, high value
+        white_mask = cv2.inRange(hsv, white_lower, white_upper)
+        
+        # Method 2: Look for yellow/orange exclamation marks (common in games)
+        # Yellow range in HSV  
+        yellow_lower = np.array([15, 100, 150])
+        yellow_upper = np.array([35, 255, 255])
+        yellow_mask = cv2.inRange(hsv, yellow_lower, yellow_upper)
+        
+        # Method 3: Look for red exclamation marks
+        # Red range in HSV (two ranges due to hue wraparound)
+        red_lower1 = np.array([0, 120, 120])
+        red_upper1 = np.array([10, 255, 255])
+        red_mask1 = cv2.inRange(hsv, red_lower1, red_upper1)
+        
+        red_lower2 = np.array([170, 120, 120])
+        red_upper2 = np.array([180, 255, 255])
+        red_mask2 = cv2.inRange(hsv, red_lower2, red_upper2)
+        red_mask = cv2.bitwise_or(red_mask1, red_mask2)
+        
+        # EXCLUDE blue/cyan colors that match energy orbs
+        # Blue/cyan range to exclude (your character's abilities)
+        blue_lower = np.array([80, 50, 50])   # Cyan/blue range
+        blue_upper = np.array([130, 255, 255])
+        blue_mask = cv2.inRange(hsv, blue_lower, blue_upper)
+        
+        # Combine exclamation color masks but subtract blue/cyan
+        combined_mask = cv2.bitwise_or(cv2.bitwise_or(white_mask, yellow_mask), red_mask)
+        combined_mask = cv2.bitwise_and(combined_mask, cv2.bitwise_not(blue_mask))  # Remove blue areas
+        
+        # Method 4: Edge detection for "!" shape
+        gray = cv2.cvtColor(screenshot_bgr, cv2.COLOR_BGR2GRAY)
+        edges = cv2.Canny(gray, 50, 150)
+        
+        # Count pixels in each detection method
+        white_pixels = cv2.countNonZero(white_mask)
+        yellow_pixels = cv2.countNonZero(yellow_mask)
+        red_pixels = cv2.countNonZero(red_mask)
+        edge_pixels = cv2.countNonZero(edges)
+        total_colored_pixels = cv2.countNonZero(combined_mask)
+        
+        # Look for contours that might be "!" shaped
+        contours, _ = cv2.findContours(combined_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        # Analyze contours for "!" characteristics
+        exclamation_score = 0.0
+        
+        for contour in contours:
+            area = cv2.contourArea(contour)
+            if area < 15:  # Too small for exclamation mark
+                continue
+            if area > 800:  # Too large (likely energy orb, not exclamation)
+                continue
+                
+            # Get bounding rectangle
+            x, y, w, h = cv2.boundingRect(contour)
+            
+            # "!" should be taller than it is wide (strict ratio)
+            aspect_ratio = h / w if w > 0 else 0
+            if aspect_ratio > 2.5:  # Very tall and narrow like "!" (stricter)
+                exclamation_score += 0.4
+                
+            # "!" should have reasonable size (smaller range)
+            if 15 <= area <= 300:  # Smaller area for actual exclamation marks
+                exclamation_score += 0.3
+                
+            # Additional checks for "!" characteristics
+            hull = cv2.convexHull(contour)
+            hull_area = cv2.contourArea(hull)
+            if hull_area > 0:
+                solidity = area / hull_area
+                if solidity > 0.7:  # Fairly solid shape
+                    exclamation_score += 0.2
+        
+        # Calculate overall confidence
+        confidence = 0.0
+        
+        # Color-based confidence
+        if total_colored_pixels > 50:
+            confidence += min(total_colored_pixels / 500.0, 0.4)
+        
+        # Edge-based confidence
+        if edge_pixels > 100:
+            confidence += min(edge_pixels / 1000.0, 0.3)
+            
+        # Shape-based confidence
+        confidence += min(exclamation_score, 0.3)
+        
+        # Determine if fish is detected (stricter criteria)
+        found = (confidence >= 0.5 and exclamation_score > 0.3 and total_colored_pixels < 1000) or \
+                (exclamation_score > 0.6 and total_colored_pixels > 20 and total_colored_pixels < 500)
+        
+        if found:
+            print(f"🐟 EXCLAMATION DETECTED! Colors:{total_colored_pixels}, Edges:{edge_pixels}, Shape:{exclamation_score:.2f}")
+        
+        return found, confidence
+        
+    except Exception as e:
+        print(f"Error in exclamation detection: {e}")
+        return False, 0.0
+
 def _fish_on_hook_fallback():
     """
     Fallback detection method using alternative approaches.
-    For use when template matching fails after Roblox updates.
+    For use when exclamation detection fails.
     """
     try:
-        # This is a placeholder for alternative detection methods
-        # You might need to add specific color detection or OCR here
-        # based on what the new Fish_On_Hook indicator looks like
-        
-        # For now, return False to prevent false positives
-        # TODO: Implement color-based or OCR-based detection if needed
+        # This can be expanded with OCR or other methods if needed
         return False
         
     except Exception as e:
@@ -278,10 +395,10 @@ def _fish_on_hook_fallback():
         return False
 
 def Fish_On_Hook(x, y, duration=0.011):
-    """Detect the fish-on-hook indicator and click the current mouse position.
+    """Detect the fish-on-hook indicator using exclamation mark detection.
     
-    Enhanced with multi-scale template matching and fallback detection
-    for Roblox update compatibility.
+    Updated to look for the "!" indicator that appears when fish is on hook,
+    as identified in debug screenshots. Much more reliable than template matching.
 
     Returns True when fish detected and minigame started, False otherwise.
     """
@@ -289,65 +406,23 @@ def Fish_On_Hook(x, y, duration=0.011):
     if not (ISROBLOX_OPEN_AVAILABLE and IsRobloxOpen and IsRobloxOpen.validate_roblox_and_game()):
         return False
     
-    # load detector templates lazily
-    try:
-        if not FISHING_ROD_DETECTOR_AVAILABLE or FishingRodDetector is None:
-            return False
-        frod = FishingRodDetector.get_detector_module()
-    except (RuntimeError, AttributeError):
-        return False
-    # prefer detector-provided generic template, fall back to module-level one
-    generic_tpl = getattr(frod, 'FISH_ON_HOOK_TPL', None)
-    if generic_tpl is None or (hasattr(generic_tpl, 'size') and generic_tpl.size == 0):
-        generic_tpl = globals().get('FISH_ON_HOOK_TPL')
-    
-    if generic_tpl is None or (hasattr(generic_tpl, 'size') and generic_tpl.size == 0):
-        print("Warning: Fish_On_Hook template not loaded, using fallback detection")
-        return _fish_on_hook_fallback()
-
-    # Get screen dimensions for fallback clicking
-    screen_w, screen_h = pyautogui.size()
-    
-    # Use broader fish on hook detection region - covers center area where indicator appears
-    # Based on 1920x1080 resolution, fish indicator typically appears in center-upper area
-    fish_region_left = 600
-    fish_region_top = 200  
-    fish_region_right = 1320
-    fish_region_bottom = 500
+    # Detection region covering ONLY the fishing line area, avoiding character
+    # Narrower area to avoid detecting character abilities/energy orbs
+    fish_region_left = 800    # Start further right to avoid character
+    fish_region_top = 200     # Focus on fishing line area
+    fish_region_right = 1200  # Narrower width, focused on fishing area  
+    fish_region_bottom = 500  # Focus on water/fishing line area
     fish_region_width = fish_region_right - fish_region_left
     fish_region_height = fish_region_bottom - fish_region_top
     
     # Create region tuple (left, top, width, height) for screenshot
     region = (fish_region_left, fish_region_top, fish_region_width, fish_region_height)
     
-    # Enhanced multi-scale template matching for Roblox update compatibility
-    # Lower threshold for better detection of new fish indicator
-    found, score = _match_template_multi_scale(generic_tpl, region, threshold=0.6)
+    # New detection method: Look for exclamation mark "!" indicator
+    found, confidence = _detect_exclamation_indicator(region)
+    print(f"🔍 Fish detection (!) attempt: found={found}, confidence={confidence:.3f}")
     
-    # Save debug screenshot of detection region for template creation help (every 5 seconds)
-    global _last_debug_screenshot_time
-    if '_last_debug_screenshot_time' not in globals():
-        _last_debug_screenshot_time = 0
-    
-    if time.time() - _last_debug_screenshot_time > 5.0:
-        try:
-            debug_screenshot = pyautogui.screenshot(region=region)
-            debug_path = os.path.join("debug", "fish_detection_region_debug.png")
-            debug_screenshot.save(debug_path)
-            print(f"🔍 Fish detection region saved as: {debug_path} (score: {score:.3f})")
-            _last_debug_screenshot_time = time.time()
-        except Exception as e:
-            print(f"Debug screenshot failed: {e}")
-    
-    # If multi-scale fails, try original single-scale method as fallback
-    if not found and score == 0.0:
-        print("Multi-scale detection failed, trying original method...")
-        try:
-            found, score = _match_template_in_region(generic_tpl, region, threshold=0.6)
-        except Exception as e:
-            print(f"Original template matching also failed: {e}")
-            return _fish_on_hook_fallback()
-    
+
     if found:
         # Get click position - ONLY use Roblox window center
         if not WINDOW_MANAGER_AVAILABLE:
@@ -363,14 +438,19 @@ def Fish_On_Hook(x, y, duration=0.011):
         
         # Use virtual mouse for minigame start if available
         if VIRTUAL_MOUSE_AVAILABLE and virtual_mouse is not None:
-            print(f"Virtual mouse starting minigame at ({click_x}, {click_y})")
+            print(f"🖱️ Virtual mouse starting minigame at ({click_x}, {click_y})")
             
             # First click (instant - no delays needed with virtual mouse)
             virtual_mouse.click_at(click_x, click_y)
+            print("✅ Virtual mouse first click completed")
             success1 = True
+            
+            # Brief delay between clicks
+            time.sleep(0.1)
             
             # Second click to ensure minigame starts
             virtual_mouse.click_at(click_x, click_y)
+            print("✅ Virtual mouse second click completed")
             success2 = True
             
             if success1 and success2:
@@ -464,13 +544,11 @@ def safe_load_template(path):
 try:
     POWER_MAX_TPL = safe_load_template(IMAGES_DIR / 'Power_Max.png')
     POWER_ACTIVE_TPL = safe_load_template(IMAGES_DIR / 'Power_Active.png')
-    FISH_ON_HOOK_TPL = safe_load_template(IMAGES_DIR / 'Fish_On_Hook.jpg')
     SHIFT_LOCK_TPL = safe_load_template(IMAGES_DIR / 'Shift_Lock.png')
 except Exception:
     # set templates to None if loading fails
     POWER_MAX_TPL = None
     POWER_ACTIVE_TPL = None
-    FISH_ON_HOOK_TPL = None
     SHIFT_LOCK_TPL = None
 
 
@@ -836,7 +914,7 @@ def main_fishing_loop():
     max_cast_attempts = 3
     minigame_start_time = 0
     last_rod_click_time = 0  # Track when we last clicked the rod
-    rod_click_cooldown = 3.0  # Wait 3 seconds before clicking rod again
+    rod_click_cooldown = 5.0  # Wait 5 seconds before clicking rod again (prevent spam)
     last_validation_time = 0  # Track when we last validated Roblox
     validation_interval = 10.0  # Only validate every 10 seconds to reduce spam (extended for Roblox update)
     cast_start_time = 0  # Track when we started waiting for fish
@@ -864,30 +942,45 @@ def main_fishing_loop():
             if fishing_state in ["waiting", "equipping"]:
                 if current_time - last_rod_click_time < rod_click_cooldown:
                     # Still in cooldown period, skip rod detection
-                    time.sleep(0.1)
+                    time.sleep(0.5)  # Longer delay to prevent spam
                     rod_result = None
                 else:
                     rod_result = FishingRodDetector.check_region_and_act()
+                    time.sleep(0.2)  # Brief delay after detection
             else:
-                # Skip rod detection when casting/hooking/minigame
+                # Skip rod detection when casting/hooking/minigame - longer delay
                 rod_result = None
+                time.sleep(0.3)
             
             if rod_result is True:  # UN (unequipped) detected and clicked
+                print("🔧 Rod unequipped - attempting to equip...")
                 fishing_state = "equipping"
                 cast_attempts = 0
                 last_rod_click_time = current_time  # Record click time
                 
+                # Give more time for the click to register and rod to equip
+                print("⏳ Waiting for rod to equip...")
+                time.sleep(1.0)  # Initial delay for click to register
+                
                 # Wait for rod to equip with periodic checks
-                for wait_check in range(8):  # Check up to 4 seconds
+                equipped = False
+                for wait_check in range(6):  # Check up to 3 seconds total
                     time.sleep(0.5)
-                    # Quick check if rod is now equipped
+                    # Check if rod is now equipped (without clicking)
                     temp_result = FishingRodDetector.check_region_and_act()
-                    if temp_result is False:  # EQ detected
+                    if temp_result is False:  # EQ detected - rod is equipped
+                        print("✅ Rod successfully equipped!")
+                        equipped = True
                         break
-                    elif temp_result is None:
-                        pass
-                else:
-                    pass
+                    elif temp_result is None:  # No clear detection
+                        continue
+                    else:  # Still showing UN (unequipped)
+                        continue
+                
+                if not equipped:
+                    print("⚠️ Rod may not have equipped properly, continuing anyway...")
+                    # Reset to waiting state to try again after cooldown
+                    fishing_state = "waiting"
                 
                 # After rod is equipped, center mouse for fishing
                 # Get Roblox window center for mouse positioning
@@ -912,13 +1005,17 @@ def main_fishing_loop():
                 
             elif rod_result is False:  # EQ (equipped) detected - rod is ready
                 if fishing_state == "waiting" or fishing_state == "equipping":
+                    print("✅ Rod equipped - switching to casting state")
                     fishing_state = "casting"
                     cast_attempts = 0
+                    time.sleep(0.5)  # Delay before entering casting state
                 else:
+                    print(f"🔄 Rod equipped but already in state: {fishing_state}")
                     pass
                     
             elif rod_result is None:  # No clear detection or error
                 # Continue with current state but add small delay
+                print(f"❓ No clear rod detection in state: {fishing_state}")
                 time.sleep(0.2)
                 
             if fishing_state == "casting":
@@ -930,14 +1027,21 @@ def main_fishing_loop():
                     center_x, center_y = screen_w // 2, screen_h // 2
                 
                 # Cast the rod at center position
-                print(f"🎣 Casting fishing rod...")
-                CastFishingRod(center_x, center_y - 20)
-                time.sleep(2.0)  # Wait longer for casting minigame to fully disappear
+                print(f"🎣 Casting fishing rod at ({center_x}, {center_y - 20})...")
+                cast_success = CastFishingRod(center_x, center_y - 20)
                 
-                print(f"🔎 Entering hooking state - waiting for fish...")
-                fishing_state = "hooking"
-                cast_start_time = time.time()  # Record when we start waiting for fish
-                cast_attempts += 1
+                if cast_success:
+                    print("✅ Cast successful!")
+                    time.sleep(3.0)  # Wait longer for casting animation and minigame to fully disappear
+                    
+                    print(f"🔎 Entering hooking state - waiting for fish...")
+                    fishing_state = "hooking"
+                    cast_start_time = time.time()  # Record when we start waiting for fish
+                    cast_attempts += 1
+                else:
+                    print("❌ Cast failed! Returning to waiting state...")
+                    fishing_state = "waiting"
+                    time.sleep(2.0)  # Longer delay before retrying
                 
             elif fishing_state == "hooking":
                 # Check for 60-second timeout (extended for Roblox update compatibility)
@@ -952,25 +1056,20 @@ def main_fishing_loop():
                     time.sleep(0.2)  # Brief pause before restarting
                     continue
                 
-                # Save debug screenshot every 10 seconds for Roblox update analysis
-                if int(time_waiting) % 10 == 0 and abs(time_waiting - int(time_waiting)) < 0.5:
-                    try:
-                        debug_screenshot = pyautogui.screenshot()
-                        debug_path = os.path.join("debug", f"debug_roblox_update_{int(current_time)}.png")
-                        debug_screenshot.save(debug_path)
-                        print(f"📸 Debug screenshot saved: {debug_path}")
-                    except Exception as e:
-                        print(f"Debug screenshot failed: {e}")
-                
+
                 # Check for fish on hook
                 hook_result = Fish_On_Hook(0, 0)  # Coordinates not used in current implementation
                 
+
                 if hook_result:
-                    print(f"🐟 FISH ON HOOK DETECTED! Starting minigame... (hook_result: {hook_result})")
+                    print(f"🐟 FISH ON HOOK DETECTED! Clicking and waiting for minigame...")
+                    # Wait for minigame UI to load after fish click (Fish_On_Hook already clicked)
+                    time.sleep(1.0)  # Wait 1 second for minigame to fully appear
+                    print(f"🎮 Starting minigame detection...")
                     fishing_state = "minigame"
                     minigame_start_time = time.time()
                 else:
-                    # Debug: Show we're still waiting for fish (but don't spam)
+                    # Show progress every 5 seconds
                     if int(current_time) % 5 == 0 and abs(current_time - int(current_time)) < 0.1:
                         print(f"⏳ Waiting for fish... ({time_remaining:.1f}s remaining)")
                 
@@ -986,9 +1085,12 @@ def main_fishing_loop():
                     cast_attempts = 0
                 
             elif fishing_state == "minigame":
+                print("🎮 Handling fishing minigame (post-click detection)")
+                print("🎣 NOTE: Only detecting minigame AFTER fish click to avoid false positives")
                 # Handle the fishing minigame
                 if FISHING_MINIGAME_AVAILABLE and FishingMiniGame is not None:
                     minigame_result = FishingMiniGame.handle_fishing_minigame(minigame_controller)
+                    print(f"🎮 Minigame handler result: {minigame_result}")
                 else:
                     print("ERROR: FishingMiniGame not available")
                     minigame_result = True  # End minigame
@@ -1003,11 +1105,14 @@ def main_fishing_loop():
             time.sleep(0.1)
             
     except KeyboardInterrupt:
-        pass
+        print("🛑 Fishing script stopped by user (Ctrl+C)")
     except Exception as e:
-        pass
+        print(f"❌ Fishing script error: {e}")
+        print(f"Error type: {type(e).__name__}")
+        import traceback
+        traceback.print_exc()
     finally:
-        pass
+        print("🔄 Fishing script cleanup completed")
 
 
 if __name__ == "__main__":

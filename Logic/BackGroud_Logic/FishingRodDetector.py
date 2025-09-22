@@ -305,12 +305,19 @@ def check_region_and_act():
         # Use virtual mouse driver for undetectable input
         if VIRTUAL_MOUSE_AVAILABLE and virtual_mouse is not None:
             print("Using virtual mouse driver for hardware-level input")
-            success = virtual_mouse.human_click(click_x, click_y)
-            if success:
-                print(f'Virtual mouse click performed at ({click_x}, {click_y})')
-                return True
-            else:
-                print("Virtual mouse click failed, falling back to pyautogui")
+            
+            # Add small random offset for more natural clicking
+            offset_x = random.randint(-3, 3)
+            offset_y = random.randint(-3, 3)
+            final_click_x = click_x + offset_x
+            final_click_y = click_y + offset_y
+            
+            # Perform the click with slight delay to ensure it registers
+            virtual_mouse.click_at(final_click_x, final_click_y)
+            time.sleep(0.1)  # Small delay after click
+            
+            print(f'Virtual mouse click performed at ({final_click_x}, {final_click_y})')
+            return True
         
         # Fallback to regular mouse if virtual mouse fails
         print("Using fallback pyautogui input")
@@ -384,7 +391,6 @@ def safe_load_template(path):
     return None
 
 try:
-    FISH_ON_HOOK_TPL = safe_load_template(IMAGES_DIR / 'Fish_On_Hook.jpg')
     FISH_LEFT_TPL = safe_load_template(IMAGES_DIR / 'Fish_Left.png')
     FISH_RIGHT_TPL = safe_load_template(IMAGES_DIR / 'Fish_Right.png')
     SHIFT_LOCK_TPL = safe_load_template(IMAGES_DIR / 'Shift_Lock.png')
@@ -392,7 +398,6 @@ try:
     POWER_ACTIVE_TPL = safe_load_template(IMAGES_DIR / 'Power_Active.png')
 except Exception as e:
     print(f"Warning: Could not load some template images: {e}")
-    FISH_ON_HOOK_TPL = None
     FISH_LEFT_TPL = None
     FISH_RIGHT_TPL = None
     SHIFT_LOCK_TPL = None

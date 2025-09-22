@@ -47,6 +47,9 @@ from pathlib import Path
 virtual_mouse = None
 VIRTUAL_MOUSE_AVAILABLE = False
 
+# Minigame detection failure counter
+_minigame_detection_failures = 0
+
 try:
     # Try relative import first (when imported as package)
     from .VirtualMouse import VirtualMouse
@@ -421,13 +424,16 @@ def detect_minigame_elements():
     - minigame_active: bool (whether minigame UI is detected)
     """
     try:
-        # Specific minigame bar coordinates (provided by user)
-        minigame_left = 510
-        minigame_top = 794
-        minigame_right = 1418
-        minigame_bottom = 855
-        minigame_width = minigame_right - minigame_left
-        minigame_height = minigame_bottom - minigame_top
+        # Updated minigame bar coordinates based on user-provided debug screenshot analysis
+        # Precise region targeting the actual minigame bar: (498, 789) to (1465, 840)
+        # This much smaller region (967x51) avoids false positives from casting bars
+        # and focuses detection on the exact minigame UI area
+        minigame_left = 498   # Left edge of minigame bar
+        minigame_top = 789    # Top edge of minigame bar  
+        minigame_right = 1465 # Right edge of minigame bar
+        minigame_bottom = 840 # Bottom edge of minigame bar
+        minigame_width = minigame_right - minigame_left  # 967 width
+        minigame_height = minigame_bottom - minigame_top # 51 height
         
         # Take screenshot of the specific minigame region only
         minigame_region = (minigame_left, minigame_top, minigame_width, minigame_height)
@@ -445,8 +451,8 @@ def detect_minigame_elements():
         # Detect white indicator position using image-based detection
         indicator_pos = detect_white_indicator_image_based(screenshot_bgr)
         
-        # Check if minigame is active using template matching for the bar itself
-        minigame_active = detect_minigame_bar_presence(screenshot_bgr)
+        # Check if minigame is active using enhanced detection (strict mode since we're in minigame state)
+        minigame_active = detect_minigame_bar_presence(screenshot_bgr, require_fish_indicators=True)
         
         # If elements detected but no bar, still consider active if we found elements
         if not minigame_active and (fish_pos is not None or indicator_pos is not None):
@@ -625,36 +631,202 @@ def detect_white_indicator_image_based(screenshot_bgr):
         return None
 
 
-def detect_minigame_bar_presence(screenshot_bgr):
+def detect_minigame_bar_presence(screenshot_bgr, require_fish_indicators=True):
     """
-    Detect minigame bar presence using template matching with MiniGame_Bar.png only.
-    No pixel scanning fallbacks - pure image-based detection.
+    Detect minigame bar presence using multiple methods for better reliability.
+    
+    Args:
+        screenshot_bgr: The screenshot to analyze
+        require_fish_indicators: If True, requires fish-specific UI elements to avoid 
+                               detecting casting charge bars or other UI elements
+                               
     Returns True if minigame bar is detected, False otherwise.
     """
     try:
-        # Only use template matching with MiniGame_Bar.png
+        # Convert screenshot to grayscale for template matching
+        gray = cv2.cvtColor(screenshot_bgr, cv2.COLOR_BGR2GRAY)
+        image_h, image_w = gray.shape
+        
+        # Method 1: Template matching with MiniGame_Bar.png (if size allows)
+        template_detected = False
         if MINIGAME_BAR_TPL is not None:
-            # Convert screenshot to grayscale for template matching
-            gray = cv2.cvtColor(screenshot_bgr, cv2.COLOR_BGR2GRAY)
+            template_h, template_w = MINIGAME_BAR_TPL.shape
             
-            # Perform template matching
-            result = cv2.matchTemplate(gray, MINIGAME_BAR_TPL, cv2.TM_CCOEFF_NORMED)
-            min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
-            
-            # Use a confidence threshold to determine if bar is present
-            confidence_threshold = 0.7
-            if max_val >= confidence_threshold:
-                print(f"✓ Minigame bar detected using template matching (confidence: {max_val:.3f})")
-                return True
+            if template_h <= image_h and template_w <= image_w:
+                # Perform template matching with multiple scales
+                for scale in [1.0, 0.9, 0.8, 1.1, 1.2]:
+                    if scale != 1.0:
+                        # Resize template
+                        new_w = int(template_w * scale)
+                        new_h = int(template_h * scale)
+                        if new_w <= image_w and new_h <= image_h:
+                            scaled_template = cv2.resize(MINIGAME_BAR_TPL, (new_w, new_h))
+                        else:
+                            continue
+                    else:
+                        scaled_template = MINIGAME_BAR_TPL
+                    
+                    result = cv2.matchTemplate(gray, scaled_template, cv2.TM_CCOEFF_NORMED)
+                    min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
+                    
+                    if max_val >= 0.6:  # Lower threshold for more detection
+                        print(f"✓ Minigame bar detected with template (scale={scale:.1f}, confidence: {max_val:.3f})")
+                        template_detected = True
+                        break
+                
+                if not template_detected:
+                    print(f"❌ Template matching failed (all scales tested)")
             else:
-                print(f"Minigame bar template match below threshold (confidence: {max_val:.3f})")
-                return False
+                print(f"⚠️ Template size mismatch: template({template_w}x{template_h}) > image({image_w}x{image_h})")
+        
+        # Method 2: Color-based detection for minigame elements
+        color_detected = False
+        
+        # Look for characteristic minigame colors
+        # Convert to HSV for better color detection
+        hsv = cv2.cvtColor(screenshot_bgr, cv2.COLOR_BGR2HSV)
+        
+        # Look for white/light elements (indicator)
+        white_lower = np.array([0, 0, 200])
+        white_upper = np.array([180, 30, 255])
+        white_mask = cv2.inRange(hsv, white_lower, white_upper)
+        white_pixels = cv2.countNonZero(white_mask)
+        
+        # Look for colored bar elements (green/red zones)
+        colored_pixels = 0
+        for color_range in [
+            ([35, 50, 50], [85, 255, 255]),    # Green range
+            ([0, 50, 50], [10, 255, 255]),     # Red range  
+            ([170, 50, 50], [180, 255, 255])  # Red range (wrap around)
+        ]:
+            lower, upper = color_range
+            mask = cv2.inRange(hsv, np.array(lower), np.array(upper))
+            colored_pixels += cv2.countNonZero(mask)
+        
+        # Adaptive thresholds based on region size (for new precise 967x51 region)
+        region_pixels = image_h * image_w
+        
+        # Scale thresholds based on region size - new region is smaller so lower thresholds
+        if region_pixels < 60000:  # Precise minigame region
+            white_threshold = 30
+            colored_threshold = 50
+            edge_threshold = 120
+        else:  # Larger regions (backward compatibility)
+            white_threshold = 50
+            colored_threshold = 100
+            edge_threshold = 200
+        
+        # If we have significant white and colored elements, likely a minigame
+        if white_pixels > white_threshold and colored_pixels > colored_threshold:
+            print(f"✓ Minigame detected via color analysis (white: {white_pixels}>{white_threshold}, colored: {colored_pixels}>{colored_threshold})")
+            color_detected = True
         else:
-            print("Warning: MiniGame_Bar.png template not loaded - minigame detection unavailable")
-            return False
+            print(f"❌ Color analysis failed (white: {white_pixels}<={white_threshold}, colored: {colored_pixels}<={colored_threshold})")
+        
+        # Method 3: Edge detection for UI elements
+        edges = cv2.Canny(gray, 50, 150)
+        edge_pixels = cv2.countNonZero(edges)
+        edge_detected = edge_pixels > edge_threshold
+        
+        if edge_detected:
+            print(f"✓ Significant UI edges detected ({edge_pixels}>{edge_threshold} pixels)")
+        else:
+            print(f"❌ Insufficient UI edges ({edge_pixels}<={edge_threshold} pixels)")
+        
+
+        
+        # Enhanced fish-specific minigame detection to avoid false positives from casting bars
+        basic_detected = template_detected or color_detected or edge_detected
+        
+        if require_fish_indicators and basic_detected:
+            print("🔍 Basic minigame UI detected, verifying fish-specific elements...")
+            
+            # Look for fish indicators (Fish_Left.png and Fish_Right.png templates)
+            fish_indicators_found = 0
+            
+            # Check for left/right fish indicators which are unique to fishing minigame
+            if FISH_LEFT_TPL is not None and FISH_LEFT_TPL.size > 0:
+                try:
+                    # Convert template to grayscale if needed
+                    fish_left_gray = FISH_LEFT_TPL if len(FISH_LEFT_TPL.shape) == 2 else cv2.cvtColor(FISH_LEFT_TPL, cv2.COLOR_BGR2GRAY)
+                    result = cv2.matchTemplate(gray, fish_left_gray, cv2.TM_CCOEFF_NORMED)
+                    _, max_val, _, _ = cv2.minMaxLoc(result)
+                    if max_val > 0.6:
+                        fish_indicators_found += 1
+                        print(f"✓ Fish left indicator detected (confidence: {max_val:.3f})")
+                except Exception as e:
+                    print(f"Fish left template matching error: {e}")
+            
+            if FISH_RIGHT_TPL is not None and FISH_RIGHT_TPL.size > 0:
+                try:
+                    # Convert template to grayscale if needed
+                    fish_right_gray = FISH_RIGHT_TPL if len(FISH_RIGHT_TPL.shape) == 2 else cv2.cvtColor(FISH_RIGHT_TPL, cv2.COLOR_BGR2GRAY)
+                    result = cv2.matchTemplate(gray, fish_right_gray, cv2.TM_CCOEFF_NORMED)
+                    _, max_val, _, _ = cv2.minMaxLoc(result)
+                    if max_val > 0.6:
+                        fish_indicators_found += 1
+                        print(f"✓ Fish right indicator detected (confidence: {max_val:.3f})")
+                except Exception as e:
+                    print(f"Fish right template matching error: {e}")
+            
+            # Look for multiple distinct UI regions (fish minigame has complex layout)
+            # Find contours to count distinct UI elements
+            contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            significant_contours = [c for c in contours if cv2.contourArea(c) > 100]
+            
+            # Fish minigame should have multiple distinct UI elements
+            has_complex_ui = len(significant_contours) >= 3
+            
+            print(f"🔍 Fish indicators found: {fish_indicators_found}, Complex UI elements: {len(significant_contours)}")
+            
+            # Require either fish indicators OR complex UI layout to confirm fishing minigame
+            fish_minigame_confirmed = fish_indicators_found > 0 or has_complex_ui
+            
+            if fish_minigame_confirmed:
+                detected = True
+                print("🎣 ✅ FISHING MINIGAME CONFIRMED!")
+            else:
+                detected = False
+                print("🚫 UI detected but doesn't match fishing minigame pattern (likely casting bar)")
+        else:
+            detected = basic_detected
+        
+        # Save debug image with region info
+        project_root = Path(__file__).parent.parent.parent
+        debug_path = project_root / "debug" / "minigame_detection_debug.png"
+        try:
+            # Ensure debug directory exists
+            debug_path.parent.mkdir(exist_ok=True)
+            
+            # Create annotated debug image showing the analyzed region
+            debug_img = screenshot_bgr.copy()
+            h, w = debug_img.shape[:2]
+            
+            # Add border and text to show this is the analyzed region
+            cv2.rectangle(debug_img, (0, 0), (w-1, h-1), (0, 255, 0), 2)
+            cv2.putText(debug_img, f"Analyzed Region: {w}x{h}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            
+            if detected:
+                cv2.putText(debug_img, "MINIGAME DETECTED", (10, h-20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            else:
+                cv2.putText(debug_img, "NO MINIGAME", (10, h-20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+            
+            cv2.imwrite(str(debug_path), debug_img)
+            print(f"📸 Minigame detection debug saved: {debug_path} ({w}x{h})")
+        except Exception as e:
+            print(f"Failed to save debug image: {e}")
+        
+        if detected:
+            print("🎮 ✅ MINIGAME DETECTED!")
+        else:
+            print("🎮 ❌ No minigame detected")
+            
+        return detected
         
     except Exception as e:
         print(f"Error detecting minigame bar presence: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 
@@ -666,15 +838,38 @@ def handle_fishing_minigame(minigame_controller):
     Returns True when minigame is complete, False to continue.
     """
     try:
+        # Wait for minigame UI to appear after fish click
+        # This prevents detecting casting bars or other UI elements
+        import time
+        time.sleep(0.5)  # Wait 500ms for minigame to fully load after click
+        
         # Additional validation: Only run if we're truly in fish-catching minigame
         # (This function should only be called after Fish_On_Hook detection)
         
         # Detect minigame elements
         elements = detect_minigame_elements()
         
+        # Use a grace period - don't end minigame immediately on detection failure
+        # The minigame UI might flicker or be temporarily obscured
+        global _minigame_detection_failures
+        
         if not elements["minigame_active"]:
-            print("Minigame UI not detected, ending minigame...")
-            return True
+            _minigame_detection_failures += 1
+            print(f"⚠️ Minigame UI detection failed (attempt {_minigame_detection_failures}/3)")
+            
+            # Only end minigame after 3 consecutive failures
+            if _minigame_detection_failures >= 3:
+                print("❌ Minigame UI not detected for 3 attempts, ending minigame...")
+                _minigame_detection_failures = 0  # Reset counter
+                return True
+            else:
+                # Continue with default/last known positions
+                print("🎮 Continuing minigame with default positions...")
+                indicator_pos = 0.5  # Default center position
+                fish_pos = 0.5       # Default center position
+        else:
+            # Reset failure counter on successful detection
+            _minigame_detection_failures = 0
             
         indicator_pos = elements["indicator_pos"]
         fish_pos = elements["fish_pos"]
