@@ -7,6 +7,7 @@ import random
 import math
 import win32gui
 from pathlib import Path
+import importlib.util
 
 # Import virtual mouse driver
 virtual_mouse = None
@@ -33,6 +34,48 @@ except ImportError:
         VIRTUAL_MOUSE_AVAILABLE = False
 
 pyautogui.FAILSAFE = True
+
+# Cache for detector module to prevent reloading
+_detector_module_cache = None
+
+def get_detector_module():
+    """Lazily load the FishingRodDetector module.
+
+    Returns the loaded module. Raises RuntimeError if the detector cannot be found
+    or loaded. This avoids printing or exiting during import-time of this module.
+    """
+    global _detector_module_cache
+    if _detector_module_cache is not None:
+        return _detector_module_cache
+        
+    detector_path = Path(__file__).resolve()  # This module itself
+    
+    spec = importlib.util.spec_from_file_location('frod', str(detector_path))
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"failed to create import spec for: {detector_path}")
+
+    module = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(module)
+    except Exception as e:
+        raise RuntimeError(f"failed to load detector module: {e}")
+
+    _detector_module_cache = module
+    return module
+
+
+def screen_region_image():
+    """Capture a screenshot of the fishing rod detection region."""
+    left = max(0, TOP_LEFT[0])
+    top = max(0, TOP_LEFT[1])
+    right = max(left + 1, BOTTOM_RIGHT[0])
+    bottom = max(top + 1, BOTTOM_RIGHT[1])
+    w = right - left
+    h = bottom - top
+    pil = pyautogui.screenshot(region=(left, top, w, h))
+    img = cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    return img, gray, left, top
 
 
 def smooth_move_to(target_x, target_y, duration=None):
