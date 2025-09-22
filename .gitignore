@@ -10,5 +10,5 @@ test_api_updates.py
 test_roblox_checker.py
 test_integration.py
 
-# AI instructions (optional - remove this line if you want to track it)
-.github/copilot-instructions.md
+# AI instructions now tracked for development guidance
+# .github/copilot-instructions.md
