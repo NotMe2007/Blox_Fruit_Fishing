@@ -1,5 +1,6 @@
 import time
 import sys
+import os
 import cv2
 import numpy as np
 import pyautogui
@@ -478,8 +479,9 @@ def Fish_On_Hook(x, y, duration=0.011):
     if time.time() - _last_debug_screenshot_time > 5.0:
         try:
             debug_screenshot = pyautogui.screenshot(region=region)
-            debug_screenshot.save("fish_detection_region_debug.png")
-            print(f"🔍 Fish detection region saved as: fish_detection_region_debug.png (score: {score:.3f})")
+            debug_path = os.path.join("debug", "fish_detection_region_debug.png")
+            debug_screenshot.save(debug_path)
+            print(f"🔍 Fish detection region saved as: {debug_path} (score: {score:.3f})")
             _last_debug_screenshot_time = time.time()
         except Exception as e:
             print(f"Debug screenshot failed: {e}")
@@ -1388,7 +1390,7 @@ def main_fishing_loop():
                 if int(time_waiting) % 10 == 0 and abs(time_waiting - int(time_waiting)) < 0.5:
                     try:
                         debug_screenshot = pyautogui.screenshot()
-                        debug_path = f"debug_roblox_update_{int(current_time)}.png"
+                        debug_path = os.path.join("debug", f"debug_roblox_update_{int(current_time)}.png")
                         debug_screenshot.save(debug_path)
                         print(f"📸 Debug screenshot saved: {debug_path}")
                     except Exception as e:
