@@ -6,7 +6,7 @@ import requests
 import json
 import re
 from typing import Optional, Tuple, Dict, List
-
+from urllib.parse import urlparse
 
 class RobloxChecker:
     """Class to check if Roblox is running and what game is being played using both process detection and Roblox API."""
@@ -261,12 +261,22 @@ class RobloxChecker:
                                         return {'game_id': game_id, 'source': 'cmdline'}
                                 
                                 # Look for game IDs in URLs (direct games/ path)
-                                if 'roblox.com' in arg and 'games/' in arg:
-                                    match = re.search(r'games/(\d+)', arg)
-                                    if match:
-                                        game_id = int(match.group(1))
-                                        print(f"DEBUG: Found game ID from URL: {game_id}")
-                                        return {'game_id': game_id, 'source': 'url'}
+                                try:
+                                    parsed_url = urlparse(arg)
+                                    host_ok = False
+                                    if parsed_url.hostname:
+                                        # Accept exactly roblox.com or any .roblox.com subdomain
+                                        if parsed_url.hostname == "roblox.com" or parsed_url.hostname.endswith(".roblox.com"):
+                                            host_ok = True
+                                    # Optional: Could also check if path contains 'games/'
+                                    if host_ok and 'games/' in parsed_url.path:
+                                        match = re.search(r'games/(\d+)', parsed_url.path)
+                                        if match:
+                                            game_id = int(match.group(1))
+                                            print(f"DEBUG: Found game ID from URL: {game_id}")
+                                            return {'game_id': game_id, 'source': 'url'}
+                                except Exception:
+                                    pass  # Ignore any parsing errors
                                 
                                 # Look for specific Blox Fruits game IDs in the command line
                                 for bf_id in self.blox_fruits_game_ids:
