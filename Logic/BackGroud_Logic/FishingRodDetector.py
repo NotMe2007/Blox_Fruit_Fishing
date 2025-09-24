@@ -230,17 +230,47 @@ def check_region_and_act():
         False: EQ (equipped) rod detected - ready to fish
         None: No clear detection
     """
-    # Quick validation - check if Roblox window is in foreground
+    # Quick validation - check if Roblox window is available (but don't require foreground)
     try:
         foreground_hwnd = win32gui.GetForegroundWindow()
         foreground_title = win32gui.GetWindowText(foreground_hwnd).lower()
         
+        # Only warn if Roblox not in foreground, but don't skip detection
         if 'roblox' not in foreground_title:
-            print("WARNING: Roblox is not in foreground. Skipping rod detection.")
-            return None
+            # Check if Roblox window exists at all
+            roblox_found = False
+            def enum_windows_callback(hwnd, windows):
+                if win32gui.IsWindowVisible(hwnd):
+                    title = win32gui.GetWindowText(hwnd).lower()
+                    
+                    # Only accept actual Roblox application windows, not browser tabs
+                    if 'roblox' in title and not any(browser in title for browser in ['opera', 'chrome', 'firefox', 'edge', 'safari', 'brave']):
+                        # Additional check: try to verify it's the actual Roblox process
+                        try:
+                            import win32process
+                            import psutil
+                            _, pid = win32process.GetWindowThreadProcessId(hwnd)
+                            process = psutil.Process(pid)
+                            process_name = process.name().lower()
+                            
+                            if 'roblox' in process_name or 'robloxplayerbeta' in process_name:
+                                windows.append((hwnd, title))
+                        except (ImportError, Exception):
+                            # Fallback: accept if title looks like Roblox app (not browser)
+                            if 'browser' not in title:
+                                windows.append((hwnd, title))
+                return True
+            
+            windows = []
+            win32gui.EnumWindows(enum_windows_callback, windows)
+            
+            if not windows:
+                print("WARNING: No Roblox window found. Skipping rod detection.")
+                return None
+            # Continue with detection even if not in foreground
     except Exception as e:
-        print(f"Error checking foreground window: {e}")
-        return None
+        print(f"Error checking window state: {e}")
+        # Continue anyway - don't let window check failure stop detection
     
     try:
         un_gray, eq_gray = load_templates()

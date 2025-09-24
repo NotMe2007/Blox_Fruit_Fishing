@@ -633,7 +633,8 @@ def detect_white_indicator_image_based(screenshot_bgr):
 
 def detect_minigame_bar_presence(screenshot_bgr, require_fish_indicators=True):
     """
-    Detect minigame bar presence using multiple methods for better reliability.
+    Detect minigame bar presence using fish indicators as the primary method.
+    Fish left/right arrows are unique to the fishing minigame and provide the most reliable detection.
     
     Args:
         screenshot_bgr: The screenshot to analyze
@@ -647,7 +648,97 @@ def detect_minigame_bar_presence(screenshot_bgr, require_fish_indicators=True):
         gray = cv2.cvtColor(screenshot_bgr, cv2.COLOR_BGR2GRAY)
         image_h, image_w = gray.shape
         
-        # Method 1: Template matching with MiniGame_Bar.png (if size allows)
+        # PRIMARY METHOD: Fish indicators (left/right arrows) - most reliable
+        fish_indicators_found = 0
+        fish_detection_confidence = 0.0
+        
+        print("🔍 Primary detection: Looking for fish left/right indicators...")
+        
+        # Check for left fish indicator
+        if FISH_LEFT_TPL is not None and FISH_LEFT_TPL.size > 0:
+            try:
+                # Convert template to grayscale if needed
+                fish_left_gray = FISH_LEFT_TPL if len(FISH_LEFT_TPL.shape) == 2 else cv2.cvtColor(FISH_LEFT_TPL, cv2.COLOR_BGR2GRAY)
+                
+                # Multi-scale template matching for better detection
+                best_confidence = 0.0
+                for scale in [1.0, 0.9, 0.8, 1.1, 1.2]:
+                    if scale != 1.0:
+                        template_h, template_w = fish_left_gray.shape
+                        new_w = int(template_w * scale)
+                        new_h = int(template_h * scale)
+                        if new_w <= image_w and new_h <= image_h and new_w > 0 and new_h > 0:
+                            scaled_template = cv2.resize(fish_left_gray, (new_w, new_h))
+                        else:
+                            continue
+                    else:
+                        scaled_template = fish_left_gray
+                    
+                    result = cv2.matchTemplate(gray, scaled_template, cv2.TM_CCOEFF_NORMED)
+                    _, max_val, _, _ = cv2.minMaxLoc(result)
+                    best_confidence = max(best_confidence, max_val)
+                    
+                    if max_val > 0.6:  # Reliable threshold
+                        fish_indicators_found += 1
+                        fish_detection_confidence = max(fish_detection_confidence, max_val)
+                        print(f"✅ Fish LEFT indicator detected! (scale={scale:.1f}, confidence: {max_val:.3f})")
+                        break
+                
+                if best_confidence < 0.6:
+                    print(f"❌ Fish left indicator: best confidence {best_confidence:.3f} < 0.6")
+                    
+            except Exception as e:
+                print(f"Fish left template matching error: {e}")
+        
+        # Check for right fish indicator
+        if FISH_RIGHT_TPL is not None and FISH_RIGHT_TPL.size > 0:
+            try:
+                # Convert template to grayscale if needed
+                fish_right_gray = FISH_RIGHT_TPL if len(FISH_RIGHT_TPL.shape) == 2 else cv2.cvtColor(FISH_RIGHT_TPL, cv2.COLOR_BGR2GRAY)
+                
+                # Multi-scale template matching for better detection
+                best_confidence = 0.0
+                for scale in [1.0, 0.9, 0.8, 1.1, 1.2]:
+                    if scale != 1.0:
+                        template_h, template_w = fish_right_gray.shape
+                        new_w = int(template_w * scale)
+                        new_h = int(template_h * scale)
+                        if new_w <= image_w and new_h <= image_h and new_w > 0 and new_h > 0:
+                            scaled_template = cv2.resize(fish_right_gray, (new_w, new_h))
+                        else:
+                            continue
+                    else:
+                        scaled_template = fish_right_gray
+                    
+                    result = cv2.matchTemplate(gray, scaled_template, cv2.TM_CCOEFF_NORMED)
+                    _, max_val, _, _ = cv2.minMaxLoc(result)
+                    best_confidence = max(best_confidence, max_val)
+                    
+                    if max_val > 0.6:  # Reliable threshold
+                        fish_indicators_found += 1
+                        fish_detection_confidence = max(fish_detection_confidence, max_val)
+                        print(f"✅ Fish RIGHT indicator detected! (scale={scale:.1f}, confidence: {max_val:.3f})")
+                        break
+                
+                if best_confidence < 0.6:
+                    print(f"❌ Fish right indicator: best confidence {best_confidence:.3f} < 0.6")
+                    
+            except Exception as e:
+                print(f"Fish right template matching error: {e}")
+        
+        # Primary decision based on fish indicators
+        if fish_indicators_found > 0:
+            print(f"🎣 ✅ FISHING MINIGAME CONFIRMED! Found {fish_indicators_found} fish indicator(s) (confidence: {fish_detection_confidence:.3f})")
+            return True
+        
+        # If fish indicators required but not found, return False
+        if require_fish_indicators:
+            print("🚫 No fish indicators found - not a fishing minigame (avoiding false positive)")
+            return False
+        
+        print("⚠️ Fish indicators not found, falling back to secondary detection methods...")
+        
+        # FALLBACK METHOD: Template matching with MiniGame_Bar.png (less reliable)
         template_detected = False
         if MINIGAME_BAR_TPL is not None:
             template_h, template_w = MINIGAME_BAR_TPL.shape
@@ -726,70 +817,57 @@ def detect_minigame_bar_presence(screenshot_bgr, require_fish_indicators=True):
         # Method 3: Edge detection for UI elements
         edges = cv2.Canny(gray, 50, 150)
         edge_pixels = cv2.countNonZero(edges)
-        edge_detected = edge_pixels > edge_threshold
         
-        if edge_detected:
-            print(f"✓ Significant UI edges detected ({edge_pixels}>{edge_threshold} pixels)")
+        # FALLBACK METHOD: Color-based detection (less reliable, kept for compatibility)
+        print("🔍 Fallback method: Color-based detection...")
+        color_detected = False
+        
+        # Look for characteristic minigame colors
+        # Convert to HSV for better color detection
+        hsv = cv2.cvtColor(screenshot_bgr, cv2.COLOR_BGR2HSV)
+        
+        # Look for white/light elements (indicator)
+        white_lower = np.array([0, 0, 200])
+        white_upper = np.array([180, 30, 255])
+        white_mask = cv2.inRange(hsv, white_lower, white_upper)
+        white_pixels = cv2.countNonZero(white_mask)
+        
+        # Look for colored bar elements (green/red zones)
+        colored_pixels = 0
+        for color_range in [
+            ([35, 50, 50], [85, 255, 255]),    # Green range
+            ([0, 50, 50], [10, 255, 255]),     # Red range  
+            ([170, 50, 50], [180, 255, 255])  # Red range (wrap around)
+        ]:
+            lower, upper = color_range
+            mask = cv2.inRange(hsv, np.array(lower), np.array(upper))
+            colored_pixels += cv2.countNonZero(mask)
+        
+        # Adaptive thresholds based on region size
+        region_pixels = image_h * image_w
+        
+        # Scale thresholds based on region size - new region is smaller so lower thresholds
+        if region_pixels < 60000:  # Precise minigame region
+            white_threshold = 30
+            colored_threshold = 50
+        else:  # Larger regions (backward compatibility)
+            white_threshold = 50
+            colored_threshold = 100
+        
+        # If we have significant white and colored elements, might be a minigame
+        if white_pixels > white_threshold and colored_pixels > colored_threshold:
+            color_detected = True
+            print(f"✓ Color-based detection: white_pixels={white_pixels}>{white_threshold}, colored_pixels={colored_pixels}>{colored_threshold}")
         else:
-            print(f"❌ Insufficient UI edges ({edge_pixels}<={edge_threshold} pixels)")
+            print(f"❌ Color-based detection failed: white_pixels={white_pixels}<={white_threshold}, colored_pixels={colored_pixels}<={colored_threshold}")
         
-
+        # Final fallback decision (only for compatibility when fish indicators disabled)
+        detected = template_detected or color_detected
         
-        # Enhanced fish-specific minigame detection to avoid false positives from casting bars
-        basic_detected = template_detected or color_detected or edge_detected
-        
-        if require_fish_indicators and basic_detected:
-            print("🔍 Basic minigame UI detected, verifying fish-specific elements...")
-            
-            # Look for fish indicators (Fish_Left.png and Fish_Right.png templates)
-            fish_indicators_found = 0
-            
-            # Check for left/right fish indicators which are unique to fishing minigame
-            if FISH_LEFT_TPL is not None and FISH_LEFT_TPL.size > 0:
-                try:
-                    # Convert template to grayscale if needed
-                    fish_left_gray = FISH_LEFT_TPL if len(FISH_LEFT_TPL.shape) == 2 else cv2.cvtColor(FISH_LEFT_TPL, cv2.COLOR_BGR2GRAY)
-                    result = cv2.matchTemplate(gray, fish_left_gray, cv2.TM_CCOEFF_NORMED)
-                    _, max_val, _, _ = cv2.minMaxLoc(result)
-                    if max_val > 0.6:
-                        fish_indicators_found += 1
-                        print(f"✓ Fish left indicator detected (confidence: {max_val:.3f})")
-                except Exception as e:
-                    print(f"Fish left template matching error: {e}")
-            
-            if FISH_RIGHT_TPL is not None and FISH_RIGHT_TPL.size > 0:
-                try:
-                    # Convert template to grayscale if needed
-                    fish_right_gray = FISH_RIGHT_TPL if len(FISH_RIGHT_TPL.shape) == 2 else cv2.cvtColor(FISH_RIGHT_TPL, cv2.COLOR_BGR2GRAY)
-                    result = cv2.matchTemplate(gray, fish_right_gray, cv2.TM_CCOEFF_NORMED)
-                    _, max_val, _, _ = cv2.minMaxLoc(result)
-                    if max_val > 0.6:
-                        fish_indicators_found += 1
-                        print(f"✓ Fish right indicator detected (confidence: {max_val:.3f})")
-                except Exception as e:
-                    print(f"Fish right template matching error: {e}")
-            
-            # Look for multiple distinct UI regions (fish minigame has complex layout)
-            # Find contours to count distinct UI elements
-            contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            significant_contours = [c for c in contours if cv2.contourArea(c) > 100]
-            
-            # Fish minigame should have multiple distinct UI elements
-            has_complex_ui = len(significant_contours) >= 3
-            
-            print(f"🔍 Fish indicators found: {fish_indicators_found}, Complex UI elements: {len(significant_contours)}")
-            
-            # Require either fish indicators OR complex UI layout to confirm fishing minigame
-            fish_minigame_confirmed = fish_indicators_found > 0 or has_complex_ui
-            
-            if fish_minigame_confirmed:
-                detected = True
-                print("🎣 ✅ FISHING MINIGAME CONFIRMED!")
-            else:
-                detected = False
-                print("🚫 UI detected but doesn't match fishing minigame pattern (likely casting bar)")
+        if detected:
+            print("⚠️ Fallback detection positive - but WITHOUT fish indicators, this might be a false positive!")
         else:
-            detected = basic_detected
+            print("❌ All detection methods failed - no minigame found")
         
         # Save debug image with region info
         project_root = Path(__file__).parent.parent.parent

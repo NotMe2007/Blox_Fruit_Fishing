@@ -26,6 +26,18 @@ except ImportError as e:
     virtual_mouse = None
     VIRTUAL_MOUSE_AVAILABLE = False
 
+# Import virtual keyboard driver
+virtual_keyboard = None
+VIRTUAL_KEYBOARD_AVAILABLE = False
+
+try:
+    from BackGroud_Logic.VirtualKeyboard import VirtualKeyboard
+    virtual_keyboard = VirtualKeyboard()
+    VIRTUAL_KEYBOARD_AVAILABLE = True
+except ImportError as e:
+    virtual_keyboard = None
+    VIRTUAL_KEYBOARD_AVAILABLE = False
+
 # Import window manager for proper Roblox window handling
 try:
     from BackGroud_Logic.WindowManager import roblox_window_manager, get_roblox_coordinates, get_roblox_window_region, ensure_roblox_focused # type: ignore
@@ -163,28 +175,38 @@ def CastFishingRod(x, y, hold_seconds=0.93):
     return True
 
 def Zoom_In(x, y, duration=0.05):
-    # Simulate pressing 'i' 45 times to zoom in. Ensures Roblox focus first.
+    # Simulate pressing 'i' 45 times to zoom in using VirtualKeyboard bypass.
     # x,y are kept for API compatibility but aren't used for key presses.
     
     # Ensure Roblox window is focused for keyboard input
     if WINDOW_MANAGER_AVAILABLE:
         ensure_roblox_focused()
     
-    for _ in range(45):
-        pyautogui.press('i')
-        time.sleep(duration)  # Delay for Roblox key registration
+    # Use VirtualKeyboard if available (bypass method)
+    if VIRTUAL_KEYBOARD_AVAILABLE and virtual_keyboard is not None:
+        virtual_keyboard.tap_key_multiple('i', 45, delay=duration)
+    else:
+        # Fallback to PyAutoGUI (detectable)
+        for _ in range(45):
+            pyautogui.press('i')
+            time.sleep(duration)  # Delay for Roblox key registration
 
 def Zoom_Out(x, y, duration=0.05):
-    # Simulate pressing 'o' four times to zoom out. Ensures Roblox focus first.
+    # Simulate pressing 'o' four times to zoom out using VirtualKeyboard bypass.
     # x,y are kept for API compatibility but aren't used for key presses.
     
     # Ensure Roblox window is focused for keyboard input
     if WINDOW_MANAGER_AVAILABLE:
         ensure_roblox_focused()
     
-    for _ in range(4):
-        pyautogui.press('o')
-        time.sleep(duration)  # Delay for Roblox key registration
+    # Use VirtualKeyboard if available (bypass method)
+    if VIRTUAL_KEYBOARD_AVAILABLE and virtual_keyboard is not None:
+        virtual_keyboard.tap_key_multiple('o', 4, delay=duration)
+    else:
+        # Fallback to PyAutoGUI (detectable)
+        for _ in range(4):
+            pyautogui.press('o')
+            time.sleep(duration)  # Delay for Roblox key registration
 
 def _match_template_multi_scale(template, region, threshold=0.7):
     """
@@ -261,7 +283,133 @@ def _match_template_multi_scale(template, region, threshold=0.7):
         print(f"Template dtype: {template.dtype if template is not None else 'None'}")
         return False, 0.0
 
-def _detect_exclamation_indicator(region):
+def _detect_fish_on_hook_template(region):
+    """
+    Detect fish on hook using the improved Fish_On_Hook.png template.
+    The template has been AI-processed to remove background and focus on key indicators.
+    
+    Returns: (found: bool, confidence: float)
+    """
+    try:
+        # Check if template is loaded
+        if FISH_ON_HOOK_TPL is None:
+            print("⚠️ Fish_On_Hook template not loaded, using fallback detection")
+            return _detect_exclamation_indicator_fallback(region)
+        
+        # DEBUG: Save screenshot of the detection region
+        try:
+            import pyautogui
+            screenshot = pyautogui.screenshot(region=region)
+            debug_path = IMAGES_DIR / 'debug_fish_detection_region.png'
+            screenshot.save(debug_path)
+            print(f"🔍 DEBUG: Saved detection region screenshot to {debug_path}")
+        except Exception as debug_e:
+            print(f"⚠️ Debug screenshot failed: {debug_e}")
+        
+        # Since this is a large AI-processed template, use multi-scale matching
+        # for better accuracy across different game resolutions
+        scales = [1.0, 0.8, 0.6, 0.4]  # Multiple scales for large template
+        best_score = 0.0
+        found_at_any_scale = False
+        
+        for scale in scales:
+            try:
+                # Resize template for this scale
+                if scale != 1.0:
+                    h, w = FISH_ON_HOOK_TPL.shape[:2]
+                    new_h, new_w = int(h * scale), int(w * scale)
+                    # Skip if template becomes too small
+                    if new_h < 20 or new_w < 20:
+                        continue
+                    scaled_template = cv2.resize(FISH_ON_HOOK_TPL, (new_w, new_h))
+                else:
+                    scaled_template = FISH_ON_HOOK_TPL
+                
+                # Use lower threshold for AI-processed template (background removed)
+                found, score = _match_template_in_region(scaled_template, region, threshold=0.55)
+                
+                if score > best_score:
+                    best_score = score
+                
+                print(f"🔍 Scale {scale:.1f}: score={score:.3f}, found={found}")
+                
+                if found:
+                    print(f"🐟 FISH ON HOOK DETECTED via template (scale {scale:.1f})! (score: {score:.3f})")
+                    found_at_any_scale = True
+                    break  # Found at this scale, no need to continue
+                    
+            except Exception as scale_error:
+                print(f"⚠️ Error at scale {scale}: {scale_error}")
+                continue
+        
+        # If no match at standard thresholds, try very low threshold as last resort
+        if not found_at_any_scale and best_score > 0.35:
+            print(f"🔍 Trying very low threshold detection (best score: {best_score:.3f})")
+            # Try the original template with very low threshold
+            found_low, score_low = _match_template_in_region(FISH_ON_HOOK_TPL, region, threshold=0.35)
+            if found_low:
+                print(f"🐟 FISH ON HOOK DETECTED via template (low threshold)! (score: {score_low:.3f})")
+                return True, score_low
+        
+        # If still no detection, try simple color-based detection as emergency fallback
+        if not found_at_any_scale and best_score < 0.3:
+            print("🔍 Template detection failed, trying color-based emergency detection...")
+            color_found, color_score = _detect_red_exclamation_simple(region)
+            if color_found:
+                print(f"🐟 FISH DETECTED via color fallback! (score: {color_score:.3f})")
+                return True, color_score
+        
+        return found_at_any_scale, best_score
+        
+    except Exception as e:
+        print(f"Error in template-based Fish_On_Hook detection: {e}")
+        # Fallback to color-based detection if template fails
+        return _detect_exclamation_indicator_fallback(region)
+
+
+def _detect_red_exclamation_simple(region):
+    """
+    Simple color-based detection for red exclamation marks.
+    Emergency fallback when template matching completely fails.
+    """
+    try:
+        import pyautogui
+        import numpy as np
+        
+        # Take screenshot of region
+        screenshot = pyautogui.screenshot(region=region)
+        screenshot_np = np.array(screenshot)
+        screenshot_bgr = cv2.cvtColor(screenshot_np, cv2.COLOR_RGB2BGR)
+        
+        # Convert to HSV for better color detection
+        hsv = cv2.cvtColor(screenshot_bgr, cv2.COLOR_BGR2HSV)
+        
+        # Red color range (for red exclamation marks like in the screenshot)
+        red_lower1 = np.array([0, 120, 120])
+        red_upper1 = np.array([10, 255, 255])
+        red_mask1 = cv2.inRange(hsv, red_lower1, red_upper1)
+        
+        red_lower2 = np.array([170, 120, 120])
+        red_upper2 = np.array([180, 255, 255])
+        red_mask2 = cv2.inRange(hsv, red_lower2, red_upper2)
+        
+        red_mask = cv2.bitwise_or(red_mask1, red_mask2)
+        red_pixels = cv2.countNonZero(red_mask)
+        
+        # Simple threshold - if we have enough red pixels, likely an exclamation
+        if red_pixels > 30:  # Lowered from 50 - user has 86 pixels detected
+            confidence = min(red_pixels / 300.0, 1.0)  # Adjusted scaling
+            print(f"🔍 Simple color detection: {red_pixels} red pixels, confidence: {confidence:.3f}")
+            return red_pixels > 60, confidence  # Lowered from 100 to 60 for detection
+        
+        return False, 0.0
+        
+    except Exception as e:
+        print(f"Error in simple color detection: {e}")
+        return False, 0.0
+
+
+def _detect_exclamation_indicator_fallback(region):
     """
     Detect the exclamation mark "!" that appears when fish is on hook.
     Uses color analysis and shape detection instead of template matching.
@@ -395,10 +543,10 @@ def _fish_on_hook_fallback():
         return False
 
 def Fish_On_Hook(x, y, duration=0.011):
-    """Detect the fish-on-hook indicator using exclamation mark detection.
+    """Detect the fish-on-hook indicator using improved template matching.
     
-    Updated to look for the "!" indicator that appears when fish is on hook,
-    as identified in debug screenshots. Much more reliable than template matching.
+    Updated to use the AI-processed Fish_On_Hook.png template with background removed.
+    This provides much more reliable detection than color-based exclamation mark detection.
 
     Returns True when fish detected and minigame started, False otherwise.
     """
@@ -407,20 +555,23 @@ def Fish_On_Hook(x, y, duration=0.011):
         return False
     
     # Detection region covering ONLY the fishing line area, avoiding character
-    # Narrower area to avoid detecting character abilities/energy orbs
-    fish_region_left = 800    # Start further right to avoid character
-    fish_region_top = 200     # Focus on fishing line area
-    fish_region_right = 1200  # Narrower width, focused on fishing area  
-    fish_region_bottom = 500  # Focus on water/fishing line area
+    # EXPANDED area based on user screenshot - exclamation appears above character center
+    fish_region_left = 600    # Start further left to cover wider area
+    fish_region_top = 180     # Start higher up to catch exclamation above character
+    fish_region_right = 1300  # Wider coverage to handle different screen positions
+    fish_region_bottom = 450  # Lower to catch exclamation at various heights
     fish_region_width = fish_region_right - fish_region_left
     fish_region_height = fish_region_bottom - fish_region_top
+    
+    print(f"🔍 Fish detection region: ({fish_region_left}, {fish_region_top}) to ({fish_region_right}, {fish_region_bottom})")
+    print(f"🔍 Region size: {fish_region_width}x{fish_region_height}")
     
     # Create region tuple (left, top, width, height) for screenshot
     region = (fish_region_left, fish_region_top, fish_region_width, fish_region_height)
     
-    # New detection method: Look for exclamation mark "!" indicator
-    found, confidence = _detect_exclamation_indicator(region)
-    print(f"🔍 Fish detection (!) attempt: found={found}, confidence={confidence:.3f}")
+    # New detection method: Use improved Fish_On_Hook.png template
+    found, confidence = _detect_fish_on_hook_template(region)
+    print(f"🔍 Fish detection (template) attempt: found={found}, confidence={confidence:.3f}")
     
 
     if found:
@@ -509,9 +660,16 @@ def Shift_State(x, y, duration=0.011):
 
     found, score = _match_template_in_region(frod.SHIFT_LOCK_TPL, region, threshold=0.82)
     if found:
-        pyautogui.keyDown('shift')
-        time.sleep(duration)
-        pyautogui.keyUp('shift')
+        # Use VirtualKeyboard if available (bypass method)
+        if VIRTUAL_KEYBOARD_AVAILABLE and virtual_keyboard is not None:
+            virtual_keyboard.key_down('shift')
+            time.sleep(duration)
+            virtual_keyboard.key_up('shift')
+        else:
+            # Fallback to PyAutoGUI (detectable)
+            pyautogui.keyDown('shift')
+            time.sleep(duration)
+            pyautogui.keyUp('shift')
         return True
     return False
 
@@ -545,11 +703,14 @@ try:
     POWER_MAX_TPL = safe_load_template(IMAGES_DIR / 'Power_Max.png')
     POWER_ACTIVE_TPL = safe_load_template(IMAGES_DIR / 'Power_Active.png')
     SHIFT_LOCK_TPL = safe_load_template(IMAGES_DIR / 'Shift_Lock.png')
+    FISH_ON_HOOK_TPL = safe_load_template(IMAGES_DIR / 'Fish_On_Hook.png')
+    print(f"✅ Fish on hook template loaded: Fish_On_Hook.png (shape: {FISH_ON_HOOK_TPL.shape if FISH_ON_HOOK_TPL is not None else 'None'})")
 except Exception:
     # set templates to None if loading fails
     POWER_MAX_TPL = None
     POWER_ACTIVE_TPL = None
     SHIFT_LOCK_TPL = None
+    FISH_ON_HOOK_TPL = None
 
 
 def _match_template_in_region(template, region, threshold=0.80):
@@ -731,7 +892,10 @@ def Use_Ability_Fishing(x, y, duration=0.011):
     full_found, full_score = _match_template_in_region(power_max_tpl, region, threshold=0.84)
     if full_found:
         # power is full: press the activation key (Z)
-        pyautogui.press('z')
+        try:
+            virtual_keyboard.key_press('z')
+        except:
+            pyautogui.press('z')  # fallback
         time.sleep(0.05)
         return
 
@@ -739,7 +903,10 @@ def Use_Ability_Fishing(x, y, duration=0.011):
     fill = _estimate_bar_fill(region)
     if fill >= 0.95:
         # fallback: treat as full and press activation key
-        pyautogui.press('z')
+        try:
+            virtual_keyboard.key_press('z')
+        except:
+            pyautogui.press('z')  # fallback
         time.sleep(0.05)
 
 # --- power detection helpers and defined fishing ------------------------------------^^^^
@@ -874,7 +1041,7 @@ def main_fishing_loop():
     minigame_config = FishingMiniGame.MinigameConfig()
     
     # Set up AHK parameters optimized for basic fishing rod
-    minigame_config.control = 0.18  # Basic fishing rod Control stat (lower than advanced rods)
+    minigame_config.control = 0.17  # Basic fishing rod Control stat (lower than advanced rods)
     
     # Enhanced color detection for basic fishing rod (handles green hover state)
     minigame_config.fish_bar_color_tolerance = 15  # Higher tolerance for dual color detection
