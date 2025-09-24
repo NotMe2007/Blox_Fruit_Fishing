@@ -9,6 +9,25 @@ import win32process
 import pyautogui
 import time
 
+# Debug Logger
+try:
+    from .Debug_Logger import debug_log, LogCategory
+    DEBUG_LOGGER_AVAILABLE = True
+except ImportError:
+    try:
+        from Debug_Logger import debug_log, LogCategory
+        DEBUG_LOGGER_AVAILABLE = True
+    except ImportError:
+        DEBUG_LOGGER_AVAILABLE = False
+        # Fallback log categories
+        from enum import Enum
+        class LogCategory(Enum):
+            WINDOW_MANAGEMENT = "WINDOW_MANAGEMENT"
+            SYSTEM = "SYSTEM"
+            ERROR = "ERROR"
+        def debug_log(category, message):
+            print(f"[{category.value}] {message}")
+
 
 class RobloxWindowManager:
     def __init__(self):
@@ -64,15 +83,15 @@ class RobloxWindowManager:
                 
                 # Get window rectangle
                 self.window_rect = win32gui.GetWindowRect(self.roblox_hwnd)
-                print(f"Found Roblox window: {title}")
-                print(f"Window coordinates: {self.window_rect}")
+                debug_log(LogCategory.WINDOW_MANAGEMENT, f"Found Roblox window: {title}")
+                debug_log(LogCategory.WINDOW_MANAGEMENT, f"Window coordinates: {self.window_rect}")
                 return True
             else:
-                print("No Roblox window found!")
+                debug_log(LogCategory.WINDOW_MANAGEMENT, "No Roblox window found!")
                 return False
                 
         except Exception as e:
-            print(f"Error finding Roblox window: {e}")
+            debug_log(LogCategory.ERROR, f"Error finding Roblox window: {e}")
             return False
     
     def get_window_center(self):
@@ -136,7 +155,7 @@ class RobloxWindowManager:
             return True
             
         except Exception as e:
-            print(f"Window validation error: {e}")
+            debug_log(LogCategory.ERROR, f"Window validation error: {e}")
             self.roblox_hwnd = None
             return False
     
@@ -156,21 +175,21 @@ class RobloxWindowManager:
             win32gui.SetForegroundWindow(self.roblox_hwnd) # pyright: ignore[reportArgumentType]
             win32gui.BringWindowToTop(self.roblox_hwnd) # type: ignore
             
-            print("Roblox window brought to front")
+            debug_log(LogCategory.WINDOW_MANAGEMENT, "Roblox window brought to front")
             return True
             
         except Exception as e:
-            print(f"Failed to bring Roblox to front: {e}")
+            debug_log(LogCategory.ERROR, f"Failed to bring Roblox to front: {e}")
             # If API calls fail, try clicking on the window
             try:
                 center_x, center_y = self.get_window_center()
                 if center_x and center_y:
                     pyautogui.click(center_x, center_y)
                     time.sleep(0.5)
-                    print("Clicked Roblox window to focus it")
+                    debug_log(LogCategory.WINDOW_MANAGEMENT, "Clicked Roblox window to focus it")
                     return True
             except Exception as e2:
-                print(f"Click focus also failed: {e2}")
+                debug_log(LogCategory.ERROR, f"Click focus also failed: {e2}")
             
             return False
     
