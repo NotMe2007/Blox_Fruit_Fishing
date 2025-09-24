@@ -7,12 +7,27 @@ import tkinter.messagebox as messagebox
 import json
 from typing import Dict, Optional
 
+# Debug Logger
+try:
+    from Logic.BackGround_Logic.Debug_Logger import debug_log, LogCategory
+    DEBUG_LOGGER_AVAILABLE = True
+except ImportError:
+    DEBUG_LOGGER_AVAILABLE = False
+    # Fallback log categories
+    from enum import Enum
+    class LogCategory(Enum):
+        SYSTEM = "SYSTEM"
+        UI = "UI"  
+        ERROR = "ERROR"
+    def debug_log(category, message):
+        print(f"[{category.value}] {message}")
+
 try:
     import keyboard
     KEYBOARD_AVAILABLE = True
 except ImportError:
     KEYBOARD_AVAILABLE = False
-    print("Warning: keyboard library not available. Hotkeys will not work.")
+    debug_log(LogCategory.SYSTEM, "Warning: keyboard library not available. Hotkeys will not work.")
 
 try:
     import customtkinter as ctk
@@ -22,7 +37,7 @@ except Exception:
     ctk = None
 
 # Import the Roblox checker
-from Logic.BackGround_Logic.IsRoblox_Open import check_roblox_and_game
+from Logic.BackGround_Logic.Is_Roblox_Open import check_roblox_and_game
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -45,7 +60,7 @@ def load_hotkey_settings() -> Dict[str, str]:
             with open(SETTINGS_FILE, 'r') as f:
                 return json.load(f)
     except Exception as e:
-        print(f"Error loading hotkey settings: {e}")
+        debug_log(LogCategory.ERROR, f"Error loading hotkey settings: {e}")
     
     # Default hotkeys
     return {
@@ -60,7 +75,7 @@ def save_hotkey_settings(settings: Dict[str, str]) -> None:
         with open(SETTINGS_FILE, 'w') as f:
             json.dump(settings, f, indent=2)
     except Exception as e:
-        print(f"Error saving hotkey settings: {e}")
+        debug_log(LogCategory.ERROR, f"Error saving hotkey settings: {e}")
 
 
 def is_valid_hotkey(hotkey: str) -> bool:
@@ -269,7 +284,7 @@ class LauncherApp(_BaseLauncher):
     def _launch_script(self):
         try:
             # Note: Window focusing is now handled by the fishing script itself
-            print("Starting fishing script...")
+            debug_log(LogCategory.UI, "Starting fishing script...")
             
             # launching - status updates removed
             # spawn the script in a separate process so GUI stays responsive
@@ -299,7 +314,7 @@ class LauncherApp(_BaseLauncher):
 
     def _wait_for_blox_fruits(self):
         """Wait for user to open Blox Fruits, then automatically start the script."""
-        from Logic.BackGround_Logic.IsRoblox_Open import RobloxChecker
+        from Logic.BackGround_Logic.Is_Roblox_Open import RobloxChecker
         
         try:
             checker = RobloxChecker()
@@ -457,10 +472,10 @@ class LauncherApp(_BaseLauncher):
                 keyboard.add_hotkey(stop_hotkey, self._hotkey_stop)
             
             self.hotkeys_registered = True
-            print(f"Hotkeys registered: Start={start_hotkey}, Stop={stop_hotkey}")
+            debug_log(LogCategory.SYSTEM, f"Hotkeys registered: Start={start_hotkey}, Stop={stop_hotkey}")
             
         except Exception as e:
-            print(f"Error setting up hotkeys: {e}")
+            debug_log(LogCategory.ERROR, f"Error setting up hotkeys: {e}")
 
     def _clear_hotkeys(self):
         """Clear all registered hotkeys."""
@@ -470,9 +485,9 @@ class LauncherApp(_BaseLauncher):
         try:
             keyboard.clear_all_hotkeys()
             self.hotkeys_registered = False
-            print("All hotkeys cleared")
+            debug_log(LogCategory.SYSTEM, "All hotkeys cleared")
         except Exception as e:
-            print(f"Error clearing hotkeys: {e}")
+            debug_log(LogCategory.ERROR, f"Error clearing hotkeys: {e}")
 
     def _apply_hotkeys(self):
         """Apply new hotkey settings."""
@@ -533,7 +548,7 @@ class LauncherApp(_BaseLauncher):
             if not self.process or self.process.poll() is not None:
                 self.on_start()
         except Exception as e:
-            print(f"Error in start hotkey: {e}")
+            debug_log(LogCategory.ERROR, f"Error in start hotkey: {e}")
 
     def _hotkey_stop(self):
         """Handle stop hotkey press."""
@@ -542,7 +557,7 @@ class LauncherApp(_BaseLauncher):
             if self.process and self.process.poll() is None:
                 self._stop_process()
         except Exception as e:
-            print(f"Error in stop hotkey: {e}")
+            debug_log(LogCategory.ERROR, f"Error in stop hotkey: {e}")
 
     def destroy(self):
         """Clean up hotkeys when closing the application."""
