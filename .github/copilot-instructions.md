@@ -9,6 +9,10 @@ This is a Roblox game automation tool with a **launcher-script separation patter
 
 **Process Communication**: Launcher spawns script via `subprocess.Popen()` with daemon threading for non-blocking execution. No IPC - script runs independently once launched.
 
+**UI Flexibility**: Runtime detection of `customtkinter` availability with `tkinter` fallback using dynamic base class assignment (`_BaseClass = ctk.CTk if ctk else tk.Tk`)
+
+**Import Strategy**: All modules use defensive imports with availability flags (`VIRTUAL_MOUSE_AVAILABLE`, `FISHING_ROD_DETECTOR_AVAILABLE`) allowing graceful degradation when dependencies missing
+
 ## Key Patterns & Conventions
 
 ### Template Matching System
@@ -21,22 +25,37 @@ found, score = _match_template_in_region(template, region, threshold=0.80)
 - Templates stored in `Images/` directory (PNG/JPG files)
 - Always implement fallback detection when templates fail
 - Use grayscale conversion for better matching reliability
+- Debug images saved as `debug_*.png` when debugging enabled
+
+### Dual Import Pattern
+All BackGround_Logic modules follow this defensive import strategy:
+```python
+try:
+    from .ModuleName import ClassName  # Package-relative import
+    MODULE_AVAILABLE = True
+except ImportError:
+    try:
+        from ModuleName import ClassName  # Absolute fallback
+        MODULE_AVAILABLE = True
+    except ImportError:
+        MODULE_AVAILABLE = False
+```
 
 ### Roblox Integration Points
-- **Game State Detection**: `IsRoblox_Open.py` uses both process detection AND Roblox API calls
-- **Window Management**: `WindowManager.py` finds Roblox windows by title matching "blox fruits"
-- **Input Simulation**: `VirtualMouse.py` uses low-level Windows API to avoid detection
+- **Game State Detection**: `Is_Roblox_Open.py` uses both process detection AND Roblox API calls
+- **Window Management**: `Window_Manager.py` finds Roblox windows by title matching "blox fruits"
+- **Input Simulation**: `Virtual_Mouse.py` uses low-level Windows API to avoid detection
 - **Coordinate System**: All coordinates are normalized to screen regions for multi-resolution support
 
 ### Minigame Control Logic
-- **Physics-Based**: `Fishing_MiniGame.py` implements ported AutoHotkey fishing logic
+- **Physics-Based**: `Fishing_Mini_Game.py` implements ported AutoHotkey fishing logic
 - **Decision System**: `MinigameController.decide()` returns action dictionaries with intensity/duration
 - **Normalized Coordinates**: All positions use 0-1 range (0=left, 1=right) for resolution independence  
 - **State Inputs**: indicator position, arrow direction, stability flag drive decision logic
 
 ### Configuration Management  
 - **Dataclass Configs**: `MinigameConfig` uses `@dataclass` for structured parameters
-- **JSON Settings**: Hotkeys in `Logic/BackGroud_Logic/hotkey_settings.json`
+- **JSON Settings**: Hotkeys in `Logic/BackGround_Logic/hotkey_settings.json`
 - **Numpad Restriction**: Only numpad keys allowed (avoids game item hotkey conflicts)
 - **Validation Pattern**: `VALID_NUMPAD_KEYS = [f"num {i}" for i in range(10)]`
 - **Threading**: Launcher uses daemon threads for non-blocking script execution
@@ -45,6 +64,18 @@ found, score = _match_template_in_region(template, region, threshold=0.80)
 - Template loading failures set variables to `None` rather than crashing
 - API failures fall back to process/window title detection
 - All external calls wrapped in try-catch with graceful degradation
+
+### Module Availability Pattern
+Each module sets availability flags to handle missing dependencies:
+```python
+try:
+    from BackGround_Logic.Virtual_Mouse import VirtualMouse
+    virtual_mouse = VirtualMouse()
+    VIRTUAL_MOUSE_AVAILABLE = True
+except ImportError:
+    virtual_mouse = None  
+    VIRTUAL_MOUSE_AVAILABLE = False
+```
 
 ## Development Workflows
 
@@ -77,4 +108,3 @@ found, score = _match_template_in_region(template, region, threshold=0.80)
 - Human-like mouse movements via `smooth_move_to()`
 - Virtual mouse driver bypasses userland detection
 
-When modifying automation logic, maintain these randomization patterns to avoid game detection systems.

@@ -38,10 +38,33 @@ from dataclasses import dataclass, field
 from typing import Optional, Tuple, Dict
 import cv2
 import numpy as np
-import pyautogui
+# PyAutoGUI removed to avoid detection - using Windows API only
 import time
 import random
 from pathlib import Path
+
+# Import centralized debug logger
+try:
+    from .Debug_Logger import debug_log, LogCategory
+    DEBUG_LOGGER_AVAILABLE = True
+except ImportError:
+    try:
+        from Debug_Logger import debug_log, LogCategory
+        DEBUG_LOGGER_AVAILABLE = True
+    except ImportError:
+        DEBUG_LOGGER_AVAILABLE = False
+        # Fallback log categories
+        from enum import Enum
+        class LogCategory(Enum):
+            SYSTEM = "SYSTEM"
+            MINIGAME_DECISIONS = "MINIGAME_DECISIONS"
+            MINIGAME_DETECTION = "MINIGAME_DETECTION"
+            FISH_DETECTION = "FISH_DETECTION"
+            TEMPLATE_MATCHING = "TEMPLATE_MATCHING"
+            MOUSE_INPUT = "MOUSE_INPUT"
+            ERROR = "ERROR"
+        def debug_log(category, message):
+            print(f"[{category.value}] {message}")
 
 # Import virtual mouse driver
 virtual_mouse = None
@@ -141,9 +164,9 @@ try:
                 shape_str = f"{template.shape[0]}x{template.shape[1]}x{template.shape[2]}"
             else:
                 shape_str = f"{template.shape[0]}x{template.shape[1]}"
-            print(f"✅ Minigame template loaded: {name} (shape: {shape_str})")
+            debug_log(LogCategory.TEMPLATE, f"Template loaded: {name} (shape: {shape_str})")
         else:
-            print(f"❌ Minigame template failed to load: {name}")
+            debug_log(LogCategory.ERROR, f"Template failed to load: {name}")
             
 except Exception as e:
     print(f"Warning: Could not load minigame template images: {e}")
@@ -162,15 +185,16 @@ class MinigameConfig:
     white_bar_color_tolerance: int = 15  # White bar detection
     arrow_color_tolerance: int = 6  # Arrow/indicator detection
     
-    # Tolerances (normalized units)
-    fish_bar_half_width: float = 0.08  # half-width of the fish bar (so full width = 2*half)
-    white_bar_half_width: float = 0.02
+    # Tolerances (normalized units) - increased for better responsiveness
+    fish_bar_half_width: float = 0.12  # Increased from 0.08 - wider fish target area
+    white_bar_half_width: float = 0.03  # Increased from 0.02
 
     # Scanning delay (used by callers, returned for reference) - from AHK: 10ms
     scan_delay: float = 0.001  # 1ms converted to seconds
     
     # Dynamic fish center position (can be updated during minigame)
     fish_center: float = 0.5  # Default to center, updated by detection
+    last_known_fish_pos: float = 0.5  # Store last successful fish detection
 
     # Side bar ratio and delay (from AHK script)
     side_bar_ratio: float = 0.7  # AHK default
@@ -182,28 +206,28 @@ class MinigameConfig:
     stable_left_multiplier: float = 1.1
     stable_left_division: float = 1.12
 
-    # Unstable multipliers/divisions (simplified for easier fish game)
-    unstable_right_multiplier: float = 1.8
+    # Unstable multipliers/divisions (increased for more responsive movement)
+    unstable_right_multiplier: float = 2.2  # Increased from 1.8
     unstable_right_division: float = 1.3
-    unstable_left_multiplier: float = 1.6
+    unstable_left_multiplier: float = 2.0   # Increased from 1.6
     unstable_left_division: float = 1.2
 
     # Ankle-break multipliers (from AHK script - exact values)
     right_ankle_break_multiplier: float = 0.40
     left_ankle_break_multiplier: float = 0.10
 
-    # Pixel scaling and deadzone calculations (calculated dynamically)
+    # Pixel scaling and deadzone calculations (improved for better responsiveness)
     pixel_scaling: float = 1.0  # will be calculated based on bar width
-    deadzone: float = 0.02  # small deadzone for stability (normalized)
-    deadzone2: float = 0.04  # larger deadzone for aggressive actions (normalized)
+    deadzone: float = 0.05      # Increased from 0.02 - larger stabilization zone
+    deadzone2: float = 0.15     # Increased from 0.04 - larger tracking zone
     
-    # Boundary calculations (normalized, calculated dynamically)
-    max_left_bar: float = 0.15  # left boundary
-    max_right_bar: float = 0.85  # right boundary
+    # Boundary calculations (normalized, adjusted for better responsiveness)
+    max_left_bar: float = 0.25   # Increased from 0.15 - wider left boundary
+    max_right_bar: float = 0.75  # Decreased from 0.85 - wider right boundary
 
-    # Minimal action intensity and max clamp
-    min_intensity: float = 0.05
-    max_intensity: float = 1.0
+    # Minimal action intensity and max clamp (increased for more responsiveness)
+    min_intensity: float = 0.15  # Increased from 0.05
+    max_intensity: float = 1.5   # Increased from 1.0 for stronger actions
 
 
 class MinigameController:
@@ -248,13 +272,23 @@ class MinigameController:
         indicator = self._clamp01(indicator)
         fish_center = self._compute_target()
         
-        # Calculate direction from white bar to fish center
-        direction = indicator - fish_center  # positive = white bar is right of fish
+        # Calculate direction from indicator to fish center
+        # Positive direction means we need to move RIGHT to reach fish
+        # Negative direction means we need to move LEFT to reach fish
+        direction = fish_center - indicator  # positive = need to move right, negative = need to move left
         distance_factor = abs(direction) / self.cfg.white_bar_half_width
+        
+        print(f"🎯 Indicator: {indicator:.3f}, Fish: {fish_center:.3f}, Direction: {direction:.3f} ({'RIGHT' if direction > 0 else 'LEFT' if direction < 0 else 'CENTER'})")
+        debug_log(LogCategory.COORDINATES, f"Indicator: {indicator:.3f}, Fish: {fish_center:.3f}, Direction: {direction:.3f} ({'RIGHT' if direction > 0 else 'LEFT' if direction < 0 else 'CENTER'})")
+        
+        print(f"🔧 Config boundaries: left={self.cfg.max_left_bar}, right={self.cfg.max_right_bar}")
+        debug_log(LogCategory.DEBUG, f"Config boundaries: left={self.cfg.max_left_bar}, right={self.cfg.max_right_bar}")
         
         # Check boundary conditions (AHK Action 3 & 4) - based on indicator position
         if indicator < self.cfg.max_left_bar:
             # Indicator is at extreme left - force right movement  
+            print(f"🚨 BOUNDARY: Indicator too far LEFT ({indicator:.3f} < {self.cfg.max_left_bar})")
+            debug_log(LogCategory.MINIGAME, f"BOUNDARY: Indicator too far LEFT ({indicator:.3f} < {self.cfg.max_left_bar})")
             return {
                 "action": "move_right", 
                 "intensity": 1.1, 
@@ -264,6 +298,8 @@ class MinigameController:
             }
         elif indicator > self.cfg.max_right_bar:
             # Indicator is at extreme right - force left movement
+            print(f"🚨 BOUNDARY: Indicator too far RIGHT ({indicator:.3f} > {self.cfg.max_right_bar})")
+            debug_log(LogCategory.MINIGAME, f"BOUNDARY: Indicator too far RIGHT ({indicator:.3f} > {self.cfg.max_right_bar})")
             return {
                 "action": "move_left", 
                 "intensity": 0.9, 
@@ -274,23 +310,27 @@ class MinigameController:
         
         # Normal tracking logic based on deadzone thresholds
         if abs(direction) <= self.cfg.deadzone:
-            # AHK Action 0: Stabilize - small correction at 5.537 CPS
+            # AHK Action 0: Stabilize - rapid clicking at 5.6 CPS for stabilization
             return {
                 "action": "stabilize",
-                "intensity": 0.1,
+                "intensity": 0.8,  # Higher intensity for better stabilization
                 "note": "stabilizing",
                 "action_type": 0,
-                "duration_factor": 0.1806  # 5.537 CPS (31 clicks / 5.598542 seconds)
+                "duration_factor": 0.178,  # 5.6 CPS = 1/5.6 = 0.178 seconds per click
+                "click_interval": 0.178,  # Time between clicks for continuous stabilization
+                "stabilize_duration": 1.0  # Total stabilization period
             }
             
         elif self.cfg.deadzone < abs(direction) <= self.cfg.deadzone2:
             # AHK Action 1 & 2: Stable tracking
-            if direction > 0:  # Move left (Action 1)
+            if direction < 0:  # Need to move LEFT (Action 1)
                 intensity = abs(direction) * self.cfg.stable_left_multiplier * self.cfg.pixel_scaling
                 adaptive_duration = 0.5 + 0.5 * (distance_factor ** 1.2)
                 if distance_factor < 0.2:
                     adaptive_duration = 0.15 + 0.15 * distance_factor
                 
+                print(f"🎯 STABLE LEFT: moving left to reach fish (direction: {direction:.3f})")
+                debug_log(LogCategory.MINIGAME, f"STABLE LEFT: moving left to reach fish (direction: {direction:.3f})")
                 return {
                     "action": "move_left",
                     "intensity": min(intensity, self.cfg.max_intensity),
@@ -299,12 +339,14 @@ class MinigameController:
                     "duration_factor": adaptive_duration,
                     "counter_strafe": adaptive_duration / self.cfg.stable_left_division
                 }
-            else:  # Move right (Action 2)
+            else:  # Need to move RIGHT (Action 2)
                 intensity = abs(direction) * self.cfg.stable_right_multiplier * self.cfg.pixel_scaling
                 adaptive_duration = 0.5 + 0.5 * (distance_factor ** 1.2)
                 if distance_factor < 0.2:
                     adaptive_duration = 0.15 + 0.15 * distance_factor
-                    
+                
+                print(f"🎯 STABLE RIGHT: moving right to reach fish (direction: {direction:.3f})")
+                debug_log(LogCategory.MINIGAME, f"STABLE RIGHT: moving right to reach fish (direction: {direction:.3f})")
                 return {
                     "action": "move_right",
                     "intensity": min(intensity, self.cfg.max_intensity),
@@ -316,7 +358,7 @@ class MinigameController:
                 
         else:  # abs(direction) > deadzone2
             # AHK Action 5 & 6: Unstable/aggressive tracking
-            if direction > 0:  # Move left aggressively (Action 5)
+            if direction < 0:  # Need to move LEFT aggressively (Action 5)
                 # Calculate max duration based on Control stat (AHK style)
                 min_duration = 0.01
                 # Use a base duration that scales with distance and control
@@ -333,6 +375,7 @@ class MinigameController:
                 raw_duration = abs(direction) * self.cfg.unstable_left_multiplier * self.cfg.pixel_scaling
                 duration = max(min_duration, min(raw_duration, max_duration))
                 
+                print(f"🚀 UNSTABLE LEFT: aggressive left movement (direction: {direction:.3f})")
                 return {
                     "action": "move_left",
                     "intensity": min(1.0, raw_duration),
@@ -341,7 +384,7 @@ class MinigameController:
                     "duration_factor": duration,
                     "counter_strafe": duration / self.cfg.unstable_left_division
                 }
-            else:  # Move right aggressively (Action 6)
+            else:  # Need to move RIGHT aggressively (Action 6)
                 # Calculate max duration based on Control stat (AHK style)
                 min_duration = 0.01
                 # Use a base duration that scales with distance and control
@@ -358,6 +401,7 @@ class MinigameController:
                 raw_duration = abs(direction) * self.cfg.unstable_right_multiplier * self.cfg.pixel_scaling
                 duration = max(min_duration, min(raw_duration, max_duration))
                 
+                print(f"🚀 UNSTABLE RIGHT: aggressive right movement (direction: {direction:.3f})")
                 return {
                     "action": "move_right",
                     "intensity": min(1.0, raw_duration),
@@ -435,15 +479,66 @@ def detect_minigame_elements():
         minigame_width = minigame_right - minigame_left  # 967 width
         minigame_height = minigame_bottom - minigame_top # 51 height
         
-        # Take screenshot of the specific minigame region only
+        # Take screenshot of the specific minigame region using Windows API
         minigame_region = (minigame_left, minigame_top, minigame_width, minigame_height)
-        screenshot = pyautogui.screenshot(region=minigame_region)
+        
+        # Use Windows API for screenshot to avoid PyAutoGUI detection
+        try:
+            import win32gui
+            import win32ui
+            import win32con
+            from PIL import Image
+            
+            # Get desktop DC
+            hdesktop = win32gui.GetDesktopWindow()
+            desktop_dc = win32gui.GetWindowDC(hdesktop)
+            img_dc = win32ui.CreateDCFromHandle(desktop_dc)
+            mem_dc = img_dc.CreateCompatibleDC()
+            
+            # Create bitmap
+            screenshot_bmp = win32ui.CreateBitmap()
+            screenshot_bmp.CreateCompatibleBitmap(img_dc, minigame_width, minigame_height)
+            mem_dc.SelectObject(screenshot_bmp)
+            
+            # Copy screen region to bitmap
+            mem_dc.BitBlt((0, 0), (minigame_width, minigame_height), img_dc, (minigame_left, minigame_top), win32con.SRCCOPY)
+            
+            # Convert to PIL Image
+            bmpinfo = screenshot_bmp.GetInfo()
+            bmpstr = screenshot_bmp.GetBitmapBits(True)
+            screenshot = Image.frombuffer('RGB', (bmpinfo['bmWidth'], bmpinfo['bmHeight']), bmpstr, 'raw', 'BGRX', 0, 1)
+            
+            # Cleanup
+            mem_dc.DeleteDC()
+            win32gui.DeleteObject(screenshot_bmp.GetHandle())
+            win32gui.ReleaseDC(hdesktop, desktop_dc)
+            
+        except ImportError:
+            print("⚠️ win32gui not available, using cv2 screenshot fallback")
+            # Fallback to cv2 if win32gui not available
+            import mss
+            with mss.mss() as sct:
+                monitor = {"top": minigame_top, "left": minigame_left, "width": minigame_width, "height": minigame_height}
+                screenshot = Image.fromarray(np.array(sct.grab(monitor))[:,:,:3])  # Remove alpha channel
+        except Exception as e:
+            print(f"⚠️ Windows API screenshot failed: {e}")
+            # Final fallback - try MSS library
+            try:
+                import mss
+                with mss.mss() as sct:
+                    monitor = {"top": minigame_top, "left": minigame_left, "width": minigame_width, "height": minigame_height}
+                    screenshot = Image.fromarray(np.array(sct.grab(monitor))[:,:,:3])  # Remove alpha channel
+            except ImportError:
+                print("❌ No screenshot method available - install win32gui or mss")
+                return {"minigame_active": False, "indicator_pos": 0.5, "fish_pos": 0.5}
+        
         screenshot_np = np.array(screenshot)
         
         # Convert to BGR for OpenCV
         screenshot_bgr = cv2.cvtColor(screenshot_np, cv2.COLOR_RGB2BGR)
         
         print(f"🎯 Scanning minigame region: {minigame_region} ({minigame_width}x{minigame_height})")
+        debug_log(LogCategory.COORDINATES, f"Minigame region: {minigame_region} ({minigame_width}x{minigame_height})")
         
         # Detect fish position using image-based detection in the cropped region
         fish_pos = detect_fish_position_image_based(screenshot_bgr)
@@ -457,6 +552,7 @@ def detect_minigame_elements():
         # If elements detected but no bar, still consider active if we found elements
         if not minigame_active and (fish_pos is not None or indicator_pos is not None):
             minigame_active = True
+            debug_log(LogCategory.MINIGAME_DETECT, "Minigame active based on element detection despite bar detection failure")
         
         return {
             "minigame_active": minigame_active,
@@ -952,6 +1048,20 @@ def handle_fishing_minigame(minigame_controller):
         indicator_pos = elements["indicator_pos"]
         fish_pos = elements["fish_pos"]
         
+        # Validate fish position - if detection fails, use a more conservative approach
+        if fish_pos == 0.5:  # Default value indicates detection failure
+            # Try to use a previously detected fish position or use adaptive positioning
+            if hasattr(minigame_controller.cfg, 'last_known_fish_pos'):
+                fish_pos = minigame_controller.cfg.last_known_fish_pos
+                print(f"🐟 Using last known fish position: {fish_pos:.3f}")
+            else:
+                # Use indicator position with slight offset as fish estimate
+                fish_pos = max(0.3, min(0.7, indicator_pos))
+                print(f"🐟 Using adaptive fish position based on indicator: {fish_pos:.3f}")
+        else:
+            # Save successful fish detection for future use
+            minigame_controller.cfg.last_known_fish_pos = fish_pos
+        
         print(f"🎯 Minigame: Indicator at {indicator_pos:.3f}, Fish at {fish_pos:.3f}")
         
         # Update the minigame controller target to fish position
@@ -985,18 +1095,29 @@ def handle_fishing_minigame(minigame_controller):
 def execute_minigame_action(decision):
     """
     Execute AHK-style minigame actions with sophisticated timing and control.
-    Handles all 6 action types with proper duration, counter-strafe, and ankle break mechanics.
+    Uses only Windows API - NO PyAutoGUI to avoid detection.
     """
     try:
+        print(f"🎮 Starting minigame action execution...")
+        debug_log(LogCategory.MOUSE, "Starting minigame action execution...")
+        
         # Get click position (center of Roblox window)
         if not WINDOW_MANAGER_AVAILABLE:
+            print("❌ Window manager not available, cannot execute minigame action")
+            debug_log(LogCategory.ERROR, "Window manager not available, cannot execute minigame action")
             return
         
         try:
             click_x, click_y = get_roblox_coordinates()
             if click_x is None or click_y is None:
+                print("❌ Could not get Roblox coordinates, cannot execute minigame action")
+                debug_log(LogCategory.ERROR, "Could not get Roblox coordinates, cannot execute minigame action")
                 return
+            print(f"🎯 Using click position: ({click_x}, {click_y})")
+            debug_log(LogCategory.COORDINATES, f"Using click position: ({click_x}, {click_y})")
         except NameError:
+            print("❌ get_roblox_coordinates function not available")
+            debug_log(LogCategory.ERROR, "get_roblox_coordinates function not available")
             return
             
         action_type = decision.get("action_type", 0)
@@ -1005,35 +1126,56 @@ def execute_minigame_action(decision):
         counter_strafe = decision.get("counter_strafe", 0)
         
         print(f"🎮 Minigame Action {action_type}: {action} (duration: {duration_factor:.3f}s)")
+        debug_log(LogCategory.MINIGAME, f"Action {action_type}: {action} (duration: {duration_factor:.3f}s)")
         
-        if action_type == 0:  # Stabilize - short click
-            if VIRTUAL_MOUSE_AVAILABLE and virtual_mouse is not None:
-                virtual_mouse.mouse_down(click_x, click_y, 'left')  # Left mouse down
-                time.sleep(0.01)  # 10ms click
-                virtual_mouse.mouse_up(click_x, click_y, 'left')    # Left mouse up
-                time.sleep(0.01)
-            else:
-                pyautogui.mouseDown(click_x, click_y, button='left')
-                time.sleep(0.01)
-                pyautogui.mouseUp(click_x, click_y, button='left')
-                time.sleep(0.01)
+        # Use ONLY Windows API - no PyAutoGUI fallback to avoid detection
+        if not (VIRTUAL_MOUSE_AVAILABLE and virtual_mouse is not None):
+            print("❌ VirtualMouse not available - cannot execute minigame actions without detection")
+            print("💡 Solution: Ensure VirtualMouse module is working properly")
+            debug_log(LogCategory.ERROR, "VirtualMouse not available - cannot execute minigame actions without detection")
+            return
+            
+        if action_type == 0:  # Stabilize - continuous rapid clicking at 5.6 CPS
+            click_interval = decision.get("click_interval", 0.178)  # 5.6 CPS
+            stabilize_duration = decision.get("stabilize_duration", 1.0)
+            
+            # Calculate number of clicks needed
+            num_clicks = max(1, int(stabilize_duration / click_interval))
+            
+            print(f"🎯 Stabilizing with {num_clicks} clicks at {1/click_interval:.1f} CPS")
+            debug_log(LogCategory.MINIGAME, f"Stabilizing with {num_clicks} clicks at {1/click_interval:.1f} CPS")
+            
+            for i in range(num_clicks):
+                try:
+                    # Use low-level Windows API only
+                    virtual_mouse.mouse_down(click_x, click_y, 'left')
+                    time.sleep(0.01)  # Very brief click
+                    virtual_mouse.mouse_up(click_x, click_y, 'left')
+                    print(f"✅ API click {i+1}/{num_clicks}")
+                    debug_log(LogCategory.MOUSE, f"API click {i+1}/{num_clicks}")
+                except Exception as e:
+                    print(f"❌ Click {i+1} failed with Windows API: {e}")
+                    debug_log(LogCategory.ERROR, f"Click {i+1} failed with Windows API: {e}")
+                    return  # Don't fallback to PyAutoGUI - avoid detection
+                
+                # Wait between clicks (but not after the last click)
+                if i < num_clicks - 1:
+                    time.sleep(click_interval - 0.01)  # Subtract click duration
                 
         elif action_type == 1:  # Stable left tracking
-            if VIRTUAL_MOUSE_AVAILABLE and virtual_mouse is not None:
+            try:
                 virtual_mouse.mouse_up(click_x, click_y, 'left')    # Ensure mouse up first
                 time.sleep(duration_factor)
                 virtual_mouse.mouse_down(click_x, click_y, 'left')  # Hold to move left
                 time.sleep(0.01)
                 virtual_mouse.mouse_up(click_x, click_y, 'left')
-            else:
-                pyautogui.mouseUp(click_x, click_y, button='left')
-                time.sleep(duration_factor)
-                pyautogui.mouseDown(click_x, click_y, button='left')
-                time.sleep(0.01)
-                pyautogui.mouseUp(click_x, click_y, button='left')
+                print(f"✅ Windows API stable left tracking (duration: {duration_factor:.3f}s)")
+            except Exception as e:
+                print(f"❌ Stable left failed with Windows API: {e}")
+                return
                 
         elif action_type == 2:  # Stable right tracking
-            if VIRTUAL_MOUSE_AVAILABLE and virtual_mouse is not None:
+            try:
                 virtual_mouse.mouse_down(click_x, click_y, 'left')  # Hold to move right
                 time.sleep(duration_factor)
                 virtual_mouse.mouse_up(click_x, click_y, 'left')
@@ -1041,35 +1183,32 @@ def execute_minigame_action(decision):
                 if counter_strafe > 0:
                     virtual_mouse.mouse_up(click_x, click_y, 'left')
                     time.sleep(counter_strafe)
-            else:
-                pyautogui.mouseDown(click_x, click_y, button='left')
-                time.sleep(duration_factor)
-                pyautogui.mouseUp(click_x, click_y, button='left')
-                # Counter-strafe left
-                if counter_strafe > 0:
-                    pyautogui.mouseUp(click_x, click_y, button='left')
-                    time.sleep(counter_strafe)
+                print(f"✅ Windows API stable right tracking (duration: {duration_factor:.3f}s)")
+            except Exception as e:
+                print(f"❌ Stable right failed with Windows API: {e}")
+                return
                     
         elif action_type == 3:  # Ankle break left (release and wait)
-            if VIRTUAL_MOUSE_AVAILABLE and virtual_mouse is not None:
+            try:
                 virtual_mouse.mouse_up(click_x, click_y, 'left')    # Release completely
                 time.sleep(duration_factor)
-            else:
-                pyautogui.mouseUp(click_x, click_y, button='left')
-                time.sleep(duration_factor)
+                print(f"✅ Windows API ankle break left (duration: {duration_factor:.3f}s)")
+            except Exception as e:
+                print(f"❌ Ankle break left failed with Windows API: {e}")
+                return
                 
         elif action_type == 4:  # Ankle break right (hold and wait)
-            if VIRTUAL_MOUSE_AVAILABLE and virtual_mouse is not None:
+            try:
                 virtual_mouse.mouse_down(click_x, click_y, 'left')  # Hold down
                 time.sleep(duration_factor)
                 virtual_mouse.mouse_up(click_x, click_y, 'left')
-            else:
-                pyautogui.mouseDown(click_x, click_y, button='left')
-                time.sleep(duration_factor)
-                pyautogui.mouseUp(click_x, click_y, button='left')
+                print(f"✅ Windows API ankle break right (duration: {duration_factor:.3f}s)")
+            except Exception as e:
+                print(f"❌ Ankle break right failed with Windows API: {e}")
+                return
                 
         elif action_type == 5:  # Unstable left aggressive
-            if VIRTUAL_MOUSE_AVAILABLE and virtual_mouse is not None:
+            try:
                 virtual_mouse.mouse_up(click_x, click_y, 'left')    # Release for left
                 time.sleep(duration_factor)
                 # Counter-strafe right
@@ -1077,17 +1216,13 @@ def execute_minigame_action(decision):
                     virtual_mouse.mouse_down(click_x, click_y, 'left')
                     time.sleep(counter_strafe)
                     virtual_mouse.mouse_up(click_x, click_y, 'left')
-            else:
-                pyautogui.mouseUp(click_x, click_y, button='left')
-                time.sleep(duration_factor)
-                # Counter-strafe right
-                if counter_strafe > 0:
-                    pyautogui.mouseDown(click_x, click_y, button='left')
-                    time.sleep(counter_strafe)
-                    pyautogui.mouseUp(click_x, click_y, button='left')
+                print(f"✅ Windows API unstable left aggressive (duration: {duration_factor:.3f}s)")
+            except Exception as e:
+                print(f"❌ Unstable left aggressive failed with Windows API: {e}")
+                return
                     
         elif action_type == 6:  # Unstable right aggressive
-            if VIRTUAL_MOUSE_AVAILABLE and virtual_mouse is not None:
+            try:
                 virtual_mouse.mouse_down(click_x, click_y, 'left')  # Hold for right
                 time.sleep(duration_factor)
                 virtual_mouse.mouse_up(click_x, click_y, 'left')
@@ -1095,14 +1230,10 @@ def execute_minigame_action(decision):
                 if counter_strafe > 0:
                     virtual_mouse.mouse_up(click_x, click_y, 'left')
                     time.sleep(counter_strafe)
-            else:
-                pyautogui.mouseDown(click_x, click_y, button='left')
-                time.sleep(duration_factor)
-                pyautogui.mouseUp(click_x, click_y, button='left')
-                # Counter-strafe left
-                if counter_strafe > 0:
-                    pyautogui.mouseUp(click_x, click_y, button='left')
-                    time.sleep(counter_strafe)
+                print(f"✅ Windows API unstable right aggressive (duration: {duration_factor:.3f}s)")
+            except Exception as e:
+                print(f"❌ Unstable right aggressive failed with Windows API: {e}")
+                return
                     
     except Exception as e:
         print(f"Error executing minigame action: {e}")

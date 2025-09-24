@@ -27,9 +27,6 @@ Note out yet still working on the project, fishing ~95% done today
 
 ## How to run the Launcher
 
-1. Open the Runme.bat
-2. Run Main.py
-3. Select what you would loke it to do
-4. Have fun.
+1. Open the Run_Me.bat
 
 If you have any ideas, feel free to drop them to me on Discord: [https://discord.gg/dHUM2ejQGY](https://discord.gg/dHUM2ejQGY)

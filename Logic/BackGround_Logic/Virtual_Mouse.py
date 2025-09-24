@@ -7,6 +7,25 @@ import ctypes.wintypes
 import time
 from typing import Tuple, Optional
 
+# Debug Logger
+try:
+    from .Debug_Logger import debug_log, LogCategory
+    DEBUG_LOGGER_AVAILABLE = True
+except ImportError:
+    try:
+        from Debug_Logger import debug_log, LogCategory
+        DEBUG_LOGGER_AVAILABLE = True
+    except ImportError:
+        DEBUG_LOGGER_AVAILABLE = False
+        # Fallback log categories
+        from enum import Enum
+        class LogCategory(Enum):
+            MOUSE_INPUT = "MOUSE_INPUT"
+            SYSTEM = "SYSTEM"
+            ERROR = "ERROR"
+        def debug_log(category, message):
+            print(f"[{category.value}] {message}")
+
 
 # Windows API constants
 MOUSEEVENTF_MOVE = 0x0001
@@ -83,7 +102,7 @@ class VirtualMouse:
         self.virtual_width = self.user32.GetSystemMetrics(78)   # Width of virtual desktop
         self.virtual_height = self.user32.GetSystemMetrics(79)  # Height of virtual desktop
         
-        print(f"Virtual desktop: Left={self.virtual_left}, Top={self.virtual_top}, Width={self.virtual_width}, Height={self.virtual_height}")
+        debug_log(LogCategory.SYSTEM, f"Virtual desktop: Left={self.virtual_left}, Top={self.virtual_top}, Width={self.virtual_width}, Height={self.virtual_height}")
         
         # Also get primary screen dimensions for fallback
         self.primary_width = self.user32.GetSystemMetrics(0)
@@ -96,107 +115,68 @@ class VirtualMouse:
         return point.x, point.y
     
     def _send_input(self, *inputs):
-        """Send input using Windows API with rock-solid ctypes approach."""
+        """Send input using simplified Windows API approach - more reliable than complex buffer method."""
         import ctypes.wintypes
         
-        # Define SendInput function with explicit types
         try:
-            # Get the function handle
+            # Simplified approach: Use only the basic SendInput call
             SendInput = ctypes.windll.user32.SendInput
             
-            # Method: Use ctypes structure array with manual memory allocation
+            # Create array of INPUT structures
             nInputs = len(inputs)
+            LPINPUT = INPUT * nInputs
+            input_array = LPINPUT(*inputs)
             
-            # Create buffer for input structures
-            input_size = ctypes.sizeof(INPUT)
-            buffer_size = input_size * nInputs
-            buffer = (ctypes.c_byte * buffer_size)()
+            # Call SendInput with properly typed parameters
+            result = SendInput(nInputs, input_array, ctypes.sizeof(INPUT))
             
-            # Copy input structures to buffer
-            for i, inp in enumerate(inputs):
-                offset = i * input_size
-                ctypes.memmove(ctypes.addressof(buffer) + offset, ctypes.addressof(inp), input_size)
-            
-            # Call SendInput with buffer as LP_INPUT
-            result = SendInput(nInputs, ctypes.cast(buffer, ctypes.c_void_p), input_size)
-            
-            if result > 0:
+            if result == nInputs:
                 return result
             else:
-                print(f"⚠️ SendInput returned {result} (expected {nInputs})")
+                debug_log(LogCategory.ERROR, f"⚠️ SendInput returned {result} (expected {nInputs})")
+                error_code = ctypes.windll.kernel32.GetLastError()
+                debug_log(LogCategory.ERROR, f"⚠️ Windows error code: {error_code}")
                 
         except Exception as e:
-            print(f"⚠️ Buffer method failed: {e}")
+            debug_log(LogCategory.ERROR, f"⚠️ SendInput failed: {e}")
             
-        # Fallback: Use win32api if available (more compatible)
+        # Fallback: Use direct Windows API calls (SetCursorPos + mouse_event)
         try:
-            import win32api
-            import win32con
+            debug_log(LogCategory.MOUSE_INPUT, "🔄 Using direct API fallback...")
             
-            print("🔄 Trying win32api as fallback...")
-            
-            # Extract coordinates and operation from INPUT structure
-            if len(inputs) > 0:
-                input_struct = inputs[0]
+            for input_struct in inputs:
                 if hasattr(input_struct, '_input') and hasattr(input_struct._input, 'mi'):
                     mi = input_struct._input.mi
                     
                     # Convert absolute coordinates back to screen coordinates
-                    if mi.dwFlags & 0x8000:  # MOUSEEVENTF_ABSOLUTE
-                        # Convert from 0-65535 back to screen coords
+                    if mi.dwFlags & MOUSEEVENTF_ABSOLUTE:
                         screen_x = int((mi.dx * self.virtual_width) / 65536) + self.virtual_left
                         screen_y = int((mi.dy * self.virtual_height) / 65536) + self.virtual_top
                         
-                        if mi.dwFlags & 0x0001:  # MOUSEEVENTF_MOVE
-                            win32api.SetCursorPos((screen_x, screen_y))
-                            return 1
-                        elif mi.dwFlags & 0x0002:  # MOUSEEVENTF_LEFTDOWN
-                            win32api.SetCursorPos((screen_x, screen_y))
-                            win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, screen_x, screen_y, 0, 0)
-                            return 1
-                        elif mi.dwFlags & 0x0004:  # MOUSEEVENTF_LEFTUP
-                            win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, screen_x, screen_y, 0, 0)
-                            return 1
-                            
-        except ImportError:
-            print("⚠️ win32api not available")
-        except Exception as e:
-            print(f"⚠️ win32api method failed: {e}")
-        
-        # Final fallback: Use alternative Windows API call
-        try:
-            # Try using SetCursorPos for moves and mouse_event for clicks
-            if len(inputs) > 0:
-                input_struct = inputs[0]
-                if hasattr(input_struct, '_input') and hasattr(input_struct._input, 'mi'):
-                    mi = input_struct._input.mi
-                    
-                    # Convert coordinates
-                    if mi.dwFlags & 0x8000:  # MOUSEEVENTF_ABSOLUTE
-                        screen_x = int((mi.dx * self.virtual_width) / 65536) + self.virtual_left
-                        screen_y = int((mi.dy * self.virtual_height) / 65536) + self.virtual_top
-                        
-                        if mi.dwFlags & 0x0001:  # MOUSEEVENTF_MOVE
+                        if mi.dwFlags & MOUSEEVENTF_MOVE:
+                            # Move cursor
                             result = self.user32.SetCursorPos(screen_x, screen_y)
-                            return 1 if result else 0
-                        else:
-                            # For mouse button events, use mouse_event API
+                            if result:
+                                debug_log(LogCategory.MOUSE_INPUT, f"✅ Moved cursor to ({screen_x}, {screen_y})")
+                                return 1
+                        elif mi.dwFlags & MOUSEEVENTF_LEFTDOWN:
+                            # Mouse button down
                             self.user32.SetCursorPos(screen_x, screen_y)
+                            self.user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+                            debug_log(LogCategory.MOUSE_INPUT, f"✅ Left mouse down at ({screen_x}, {screen_y})")
+                            return 1
+                        elif mi.dwFlags & MOUSEEVENTF_LEFTUP:
+                            # Mouse button up
+                            self.user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+                            debug_log(LogCategory.MOUSE_INPUT, f"✅ Left mouse up")
+                            return 1
                             
-                            if mi.dwFlags & 0x0002:  # MOUSEEVENTF_LEFTDOWN
-                                self.user32.mouse_event(0x0002, 0, 0, 0, 0)  # MOUSEEVENTF_LEFTDOWN
-                                return 1
-                            elif mi.dwFlags & 0x0004:  # MOUSEEVENTF_LEFTUP  
-                                self.user32.mouse_event(0x0004, 0, 0, 0, 0)  # MOUSEEVENTF_LEFTUP
-                                return 1
-                                
         except Exception as e:
-            print(f"⚠️ Alternative API method failed: {e}")
+            debug_log(LogCategory.ERROR, f"⚠️ Direct API fallback failed: {e}")
         
-        # If all methods fail, raise error
-        print("❌ ALL WINDOWS API METHODS FAILED")
-        print("� VirtualMouse requires Windows API access - try running as administrator")
-        raise RuntimeError("VirtualMouse Windows API failure - no compatible method found")
+        # If all methods fail
+        debug_log(LogCategory.ERROR, "❌ All mouse input methods failed")
+        return 0
     
     def _create_mouse_input(self, dx: int, dy: int, flags: int) -> INPUT:
         """Create a mouse input structure."""

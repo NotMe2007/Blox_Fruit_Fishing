@@ -14,6 +14,23 @@ from pathlib import Path
 current_dir = Path(__file__).parent
 sys.path.insert(0, str(current_dir))
 
+# Debug Logger
+try:
+    from BackGround_Logic.Debug_Logger import debug_log, LogCategory
+    DEBUG_LOGGER_AVAILABLE = True
+except ImportError:
+    DEBUG_LOGGER_AVAILABLE = False
+    # Fallback log categories
+    from enum import Enum
+    class LogCategory(Enum):
+        FISH_DETECTION = "FISH_DETECTION"
+        FISHING_MAIN = "FISHING_MAIN"
+        MINIGAME_ACTIONS = "MINIGAME_ACTIONS"
+        SYSTEM = "SYSTEM"
+        ERROR = "ERROR"
+    def debug_log(category, message):
+        print(f"[{category.value}] {message}")
+
 # Import virtual mouse driver
 virtual_mouse = None
 VIRTUAL_MOUSE_AVAILABLE = False
@@ -59,7 +76,7 @@ try:
 except ImportError as e:
     FISHING_ROD_DETECTOR_AVAILABLE = False
     FishingRodDetector = None
-    print(f"Warning: FishingRodDetector not available: {e}")
+    debug_log(LogCategory.SYSTEM, f"Warning: FishingRodDetector not available: {e}")
 
 # Import minigame functions
 try:
@@ -68,7 +85,7 @@ try:
 except ImportError as e:
     FISHING_MINIGAME_AVAILABLE = False
     FishingMiniGame = None
-    print(f"Warning: FishingMiniGame not available: {e}")
+    debug_log(LogCategory.SYSTEM, f"Warning: FishingMiniGame not available: {e}")
 
 # Import Roblox detection functions
 try:
@@ -77,7 +94,7 @@ try:
 except ImportError as e:
     ISROBLOX_OPEN_AVAILABLE = False
     IsRobloxOpen = None
-    print(f"Warning: IsRoblox_Open not available: {e}")
+    debug_log(LogCategory.SYSTEM, f"Warning: IsRoblox_Open not available: {e}")
 
 pyautogui.FAILSAFE = True
 
@@ -216,7 +233,7 @@ def _match_template_multi_scale(template, region, threshold=0.7):
     try:
         # Validate template before processing
         if template is None or template.size == 0:
-            print("Error: Template is None or empty")
+            debug_log(LogCategory.ERROR, "Error: Template is None or empty")
             return False, 0.0
         
         # Ensure template is in the correct format (BGR, 8-bit)
@@ -230,7 +247,7 @@ def _match_template_multi_scale(template, region, threshold=0.7):
             # Template is grayscale, convert to BGR
             template_processed = cv2.cvtColor(template, cv2.COLOR_GRAY2BGR).astype(np.uint8)
         else:
-            print(f"Error: Unexpected template shape: {template.shape}")
+            debug_log(LogCategory.ERROR, f"Error: Unexpected template shape: {template.shape}")
             return False, 0.0
         
         # Take screenshot of the region
@@ -268,19 +285,19 @@ def _match_template_multi_scale(template, region, threshold=0.7):
                 best_score = max_val
             
             if max_val >= threshold:
-                print(f"🐟 FISH ON HOOK DETECTED! (confidence: {max_val:.3f}, scale: {scale})")
+                debug_log(LogCategory.FISH_DETECTION, f"🐟 FISH ON HOOK DETECTED! (confidence: {max_val:.3f}, scale: {scale})")
                 return True, max_val
         
         # If we get here, no match at any scale
         if best_score > 0.5:  # Show near-misses for debugging
-            print(f"🔍 Fish detection near-miss (best: {best_score:.3f}, threshold: {threshold})")
+            debug_log(LogCategory.FISH_DETECTION, f"🔍 Fish detection near-miss (best: {best_score:.3f}, threshold: {threshold})")
         
         return False, best_score
         
     except Exception as e:
-        print(f"Error in multi-scale Fish_On_Hook detection: {e}")
-        print(f"Template shape: {template.shape if template is not None else 'None'}")
-        print(f"Template dtype: {template.dtype if template is not None else 'None'}")
+        debug_log(LogCategory.ERROR, f"Error in multi-scale Fish_On_Hook detection: {e}")
+        debug_log(LogCategory.ERROR, f"Template shape: {template.shape if template is not None else 'None'}")
+        debug_log(LogCategory.ERROR, f"Template dtype: {template.dtype if template is not None else 'None'}")
         return False, 0.0
 
 def _detect_fish_on_hook_template(region):
@@ -293,7 +310,7 @@ def _detect_fish_on_hook_template(region):
     try:
         # Check if template is loaded
         if FISH_ON_HOOK_TPL is None:
-            print("⚠️ Fish_On_Hook template not loaded, using fallback detection")
+            debug_log(LogCategory.FISH_DETECTION, "⚠️ Fish_On_Hook template not loaded, using fallback detection")
             return _detect_exclamation_indicator_fallback(region)
         
         # DEBUG: Save screenshot of the detection region
@@ -307,9 +324,9 @@ def _detect_fish_on_hook_template(region):
             
             debug_path = debug_dir / 'fish_detection_region.png'
             screenshot.save(debug_path)
-            print(f"🔍 DEBUG: Saved detection region screenshot to {debug_path}")
+            debug_log(LogCategory.FISH_DETECTION, f"🔍 DEBUG: Saved detection region screenshot to {debug_path}")
         except Exception as debug_e:
-            print(f"⚠️ Debug screenshot failed: {debug_e}")
+            debug_log(LogCategory.ERROR, f"⚠️ Debug screenshot failed: {debug_e}")
         
         # Since this is a large AI-processed template, use multi-scale matching
         # for better accuracy across different game resolutions
@@ -336,15 +353,15 @@ def _detect_fish_on_hook_template(region):
                 if score > best_score:
                     best_score = score
                 
-                print(f"🔍 Scale {scale:.1f}: score={score:.3f}, found={found}")
+                debug_log(LogCategory.FISH_DETECTION, f"🔍 Scale {scale:.1f}: score={score:.3f}, found={found}")
                 
                 if found:
-                    print(f"🐟 FISH ON HOOK DETECTED via template (scale {scale:.1f})! (score: {score:.3f})")
+                    debug_log(LogCategory.FISH_DETECTION, f"🐟 FISH ON HOOK DETECTED via template (scale {scale:.1f})! (score: {score:.3f})")
                     found_at_any_scale = True
                     break  # Found at this scale, no need to continue
                     
             except Exception as scale_error:
-                print(f"⚠️ Error at scale {scale}: {scale_error}")
+                debug_log(LogCategory.ERROR, f"⚠️ Error at scale {scale}: {scale_error}")
                 continue
         
         # If no match at standard thresholds, try very low threshold as last resort

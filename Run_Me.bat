@@ -1,0 +1,323 @@
+@echo off
+chcp 65001 >nul 2>&1
+setlocal EnableDelayedExpansion
+
+:: =============================================================================
+:: Blox Fruit Fishing - Automated Setup and Launch Script
+:: =============================================================================
+:: This script will:
+:: 1. Check for Python installation (install if missing)
+:: 2. Check and install requirements.txt dependencies
+:: 3. Run quick tests to verify system health
+:: 4. Launch Main.py if tests pass or contact support if major issues
+:: =============================================================================
+
+echo.
+echo ========================================
+echo   BLOX FRUIT FISHING - AUTO LAUNCHER
+echo ========================================
+echo.
+
+:: Change to script directory
+cd /d "%~dp0"
+
+:: =============================================================================
+:: STEP 1: CHECK PYTHON INSTALLATION
+:: =============================================================================
+echo [STEP 1] Checking Python installation...
+
+:: Try to find Python
+python --version >nul 2>&1
+if %ERRORLEVEL% EQU 0 (
+    echo ✅ Python is installed
+    python --version
+) else (
+    echo ❌ Python not found in PATH
+    echo.
+    echo Checking for Python in common locations...
+    
+    :: Check common Python installation paths
+    set "PYTHON_FOUND="
+    for %%p in (
+        "C:\Python3*\python.exe"
+        "C:\Program Files\Python3*\python.exe"
+        "C:\Program Files (x86)\Python3*\python.exe"
+        "%LOCALAPPDATA%\Programs\Python\Python3*\python.exe"
+        "%APPDATA%\Local\Programs\Python\Python3*\python.exe"
+    ) do (
+        if exist "%%p" (
+            set "PYTHON_FOUND=%%p"
+            goto :python_found
+        )
+    )
+    
+    :python_not_found
+    echo.
+    echo 🔽 Python not found! Attempting to install Python...
+    echo.
+    echo Opening Microsoft Store to install Python...
+    echo Please install Python 3.8 or higher from the Microsoft Store
+    echo.
+    start ms-windows-store://pdp/?ProductId=9NRWMJP3717K
+    echo.
+    echo After installing Python:
+    echo 1. Close this window
+    echo 2. Run this script again
+    echo.
+    pause
+    exit /b 1
+    
+    :python_found
+    echo ✅ Found Python at: !PYTHON_FOUND!
+    set "PYTHON_CMD=!PYTHON_FOUND!"
+    goto :check_version
+)
+
+set "PYTHON_CMD=python"
+
+:check_version
+echo.
+echo [STEP 1.5] Checking Python version...
+
+:: Get Python version and check it
+for /f "tokens=2" %%i in ('%PYTHON_CMD% --version 2^>^&1') do set "PYTHON_VERSION=%%i"
+echo Python version detected: %PYTHON_VERSION%
+
+:: Extract major and minor version numbers
+for /f "tokens=1,2 delims=." %%a in ("%PYTHON_VERSION%") do (
+    set "MAJOR_VERSION=%%a"
+    set "MINOR_VERSION=%%b"
+)
+
+:: Check if version is 3.8 or higher
+if %MAJOR_VERSION% LSS 3 (
+    goto :version_too_old
+)
+if %MAJOR_VERSION% EQU 3 (
+    if %MINOR_VERSION% LSS 8 (
+        goto :version_too_old
+    )
+)
+
+echo ✅ Python version is compatible
+goto :check_venv
+
+:version_too_old
+echo ❌ Python version is too old (need 3.8+)
+echo Current version: %PYTHON_VERSION%
+echo Please install Python 3.8 or higher
+pause
+exit /b 1
+
+:check_venv
+
+:: =============================================================================
+:: STEP 2: CHECK VIRTUAL ENVIRONMENT
+:: =============================================================================
+echo.
+echo [STEP 2] Checking virtual environment...
+
+if exist ".venv\Scripts\python.exe" (
+    echo ✅ Virtual environment found
+    set "PYTHON_CMD=.venv\Scripts\python.exe"
+    set "PIP_CMD=.venv\Scripts\pip.exe"
+) else (
+    echo ⚠️  No virtual environment found, using system Python
+    set "PIP_CMD=pip"
+    
+    :: Try to create virtual environment
+    echo Creating virtual environment...
+    %PYTHON_CMD% -m venv .venv
+    if %ERRORLEVEL% EQU 0 (
+        echo ✅ Virtual environment created
+        set "PYTHON_CMD=.venv\Scripts\python.exe"
+        set "PIP_CMD=.venv\Scripts\pip.exe"
+    ) else (
+        echo ⚠️  Failed to create virtual environment, continuing with system Python
+    )
+)
+
+:: =============================================================================
+:: STEP 3: CHECK AND INSTALL REQUIREMENTS
+:: =============================================================================
+echo.
+echo [STEP 3] Checking requirements...
+
+if not exist "requirements.txt" (
+    echo ❌ requirements.txt not found!
+    echo Creating basic requirements.txt...
+    
+    echo opencv-python^>=4.8.0> requirements.txt
+    echo numpy^>=1.21.0>> requirements.txt
+    echo pillow^>=8.3.0>> requirements.txt
+    echo pyautogui^>=0.9.53>> requirements.txt
+    echo psutil^>=5.8.0>> requirements.txt
+    echo keyboard^>=0.13.5>> requirements.txt
+    echo customtkinter^>=5.0.0>> requirements.txt
+    echo pywin32^>=306>> requirements.txt
+    
+    echo ✅ Created basic requirements.txt
+)
+
+echo Installing/updating dependencies...
+%PIP_CMD% install -r requirements.txt --upgrade
+if %ERRORLEVEL% NEQ 0 (
+    echo ❌ Failed to install some dependencies
+    echo Trying alternative installation methods...
+    
+    :: Try installing core packages individually
+    echo Installing core packages...
+    %PIP_CMD% install opencv-python numpy pillow pyautogui
+    if %ERRORLEVEL% NEQ 0 (
+        echo ❌ Critical dependency installation failed
+        echo.
+        echo SOLUTION NEEDED:
+        echo 1. Check your internet connection
+        echo 2. Try running as Administrator
+        echo 3. Contact support if issues persist
+        echo.
+        pause
+        exit /b 1
+    )
+) else (
+    echo ✅ All dependencies installed successfully
+)
+
+:: =============================================================================
+:: STEP 4: RUN QUICK TESTS
+:: =============================================================================
+echo.
+echo [STEP 4] Running system health check...
+
+if not exist "tests\quick_test.py" (
+    echo ❌ Test file not found: tests\quick_test.py
+    echo Skipping tests and launching directly...
+    goto :launch_main
+)
+
+echo Running quick diagnostic tests...
+%PYTHON_CMD% tests\quick_test.py
+set "TEST_RESULT=%ERRORLEVEL%"
+
+echo.
+if %TEST_RESULT% EQU 0 (
+    echo ✅ ALL TESTS PASSED - System is ready!
+    echo Launching Blox Fruit Fishing...
+    goto :launch_main
+) else (
+    echo ⚠️  Some tests failed, checking severity...
+    
+    :: Count critical vs minor issues by running a simple check
+    echo Analyzing test results...
+    
+    :: Check if critical components work by testing imports
+    %PYTHON_CMD% -c "import cv2, numpy, PIL; print('CORE_OK')" >test_result.tmp 2>&1
+    findstr "CORE_OK" test_result.tmp >nul
+    if %ERRORLEVEL% EQU 0 (
+        echo ✅ Core components working - Minor issues detected
+        echo The system should still function with some limitations
+        echo.
+        set /p "CONTINUE=Continue anyway? (y/n): "
+        if /i "!CONTINUE!"=="y" (
+            goto :launch_main
+        ) else (
+            goto :contact_support
+        )
+    ) else (
+        echo ❌ Critical component failure detected
+        goto :contact_support
+    )
+)
+
+:: =============================================================================
+:: STEP 5: LAUNCH MAIN APPLICATION
+:: =============================================================================
+:launch_main
+echo.
+echo [STEP 5] Launching Blox Fruit Fishing...
+echo.
+echo 🎮 IMPORTANT INSTRUCTIONS:
+echo 1. Make sure Roblox is running
+echo 2. Join Blox Fruits game
+echo 3. Go to a fishing area
+echo 4. Use numpad keys to control the bot:
+echo    - Numpad 1: Start fishing
+echo    - Numpad 0: Stop/Exit
+echo.
+echo Starting GUI...
+
+if exist "Main.py" (
+    %PYTHON_CMD% Main.py
+    if %ERRORLEVEL% NEQ 0 (
+        echo.
+        echo ❌ Application crashed or failed to start
+        echo Check the error messages above
+        goto :contact_support
+    )
+) else (
+    echo ❌ Main.py not found!
+    goto :contact_support
+)
+
+echo.
+echo Application closed normally
+pause
+exit /b 0
+
+:: =============================================================================
+:: SUPPORT CONTACT SECTION
+:: =============================================================================
+:contact_support
+echo.
+echo ========================================
+echo      TECHNICAL SUPPORT NEEDED
+echo ========================================
+echo.
+echo ❌ Critical issues detected that prevent the application from running properly.
+echo.
+echo BEFORE CONTACTING SUPPORT, TRY THESE SOLUTIONS:
+echo.
+echo 1. RESTART AS ADMINISTRATOR:
+echo    - Right-click this batch file
+echo    - Select "Run as administrator"
+echo    - Try again
+echo.
+echo 2. CHECK ANTIVIRUS SOFTWARE:
+echo    - Temporarily disable antivirus
+echo    - Add this folder to antivirus exclusions
+echo    - Try running again
+echo.
+echo 3. UPDATE WINDOWS:
+echo    - Install all Windows updates
+echo    - Restart computer
+echo    - Try again
+echo.
+echo 4. CLEAN INSTALLATION:
+echo    - Delete .venv folder
+echo    - Run this script again
+echo.
+echo IF PROBLEMS PERSIST:
+echo.
+echo 📧 Contact Support:
+echo    - Create an issue on GitHub
+echo    - Include the error messages shown above
+echo    - Mention your Windows version
+echo    - Attach a screenshot of the errors
+echo.
+echo 💬 Discord Support:
+echo    - Join the project Discord server
+echo    - Share your error logs in #support
+echo.
+echo 📋 System Info to Include:
+%PYTHON_CMD% -c "import sys, platform; print(f'Python: {sys.version}'); print(f'OS: {platform.system()} {platform.release()}')" 2>nul || echo Could not get system info
+echo.
+
+:: Clean up temp files
+if exist "test_result.tmp" del "test_result.tmp"
+
+pause
+exit /b 1
+
+:: =============================================================================
+:: END OF SCRIPT
+:: =============================================================================
