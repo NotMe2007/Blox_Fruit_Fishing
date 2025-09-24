@@ -5,8 +5,6 @@ Uses low-level Windows API calls to simulate hardware mouse input.
 import ctypes
 import ctypes.wintypes
 import time
-import random
-import math
 from typing import Tuple, Optional
 
 
@@ -36,9 +34,29 @@ class MOUSEINPUT(ctypes.Structure):
         ("dwExtraInfo", ctypes.POINTER(ctypes.wintypes.ULONG))
     ]
 
+class KEYBDINPUT(ctypes.Structure):
+    _fields_ = [
+        ("wVk", ctypes.wintypes.WORD),
+        ("wScan", ctypes.wintypes.WORD),
+        ("dwFlags", ctypes.wintypes.DWORD),
+        ("time", ctypes.wintypes.DWORD),
+        ("dwExtraInfo", ctypes.POINTER(ctypes.wintypes.ULONG))
+    ]
+
+class HARDWAREINPUT(ctypes.Structure):
+    _fields_ = [
+        ("uMsg", ctypes.wintypes.DWORD),
+        ("wParamL", ctypes.wintypes.WORD),
+        ("wParamH", ctypes.wintypes.WORD)
+    ]
+
 class INPUT(ctypes.Structure):
     class _INPUT(ctypes.Union):
-        _fields_ = [("mi", MOUSEINPUT)]
+        _fields_ = [
+            ("mi", MOUSEINPUT),
+            ("ki", KEYBDINPUT),
+            ("hi", HARDWAREINPUT)
+        ]
     
     _anonymous_ = ("_input",)
     _fields_ = [
@@ -78,12 +96,107 @@ class VirtualMouse:
         return point.x, point.y
     
     def _send_input(self, *inputs):
-        """Send input using Windows API."""
-        nInputs = len(inputs)
-        LPINPUT = INPUT * nInputs
-        pInputs = LPINPUT(*inputs)
-        cbSize = ctypes.c_int(ctypes.sizeof(INPUT))
-        return self.user32.SendInput(nInputs, pInputs, cbSize)
+        """Send input using Windows API with rock-solid ctypes approach."""
+        import ctypes.wintypes
+        
+        # Define SendInput function with explicit types
+        try:
+            # Get the function handle
+            SendInput = ctypes.windll.user32.SendInput
+            
+            # Method: Use ctypes structure array with manual memory allocation
+            nInputs = len(inputs)
+            
+            # Create buffer for input structures
+            input_size = ctypes.sizeof(INPUT)
+            buffer_size = input_size * nInputs
+            buffer = (ctypes.c_byte * buffer_size)()
+            
+            # Copy input structures to buffer
+            for i, inp in enumerate(inputs):
+                offset = i * input_size
+                ctypes.memmove(ctypes.addressof(buffer) + offset, ctypes.addressof(inp), input_size)
+            
+            # Call SendInput with buffer as LP_INPUT
+            result = SendInput(nInputs, ctypes.cast(buffer, ctypes.c_void_p), input_size)
+            
+            if result > 0:
+                return result
+            else:
+                print(f"⚠️ SendInput returned {result} (expected {nInputs})")
+                
+        except Exception as e:
+            print(f"⚠️ Buffer method failed: {e}")
+            
+        # Fallback: Use win32api if available (more compatible)
+        try:
+            import win32api
+            import win32con
+            
+            print("🔄 Trying win32api as fallback...")
+            
+            # Extract coordinates and operation from INPUT structure
+            if len(inputs) > 0:
+                input_struct = inputs[0]
+                if hasattr(input_struct, '_input') and hasattr(input_struct._input, 'mi'):
+                    mi = input_struct._input.mi
+                    
+                    # Convert absolute coordinates back to screen coordinates
+                    if mi.dwFlags & 0x8000:  # MOUSEEVENTF_ABSOLUTE
+                        # Convert from 0-65535 back to screen coords
+                        screen_x = int((mi.dx * self.virtual_width) / 65536) + self.virtual_left
+                        screen_y = int((mi.dy * self.virtual_height) / 65536) + self.virtual_top
+                        
+                        if mi.dwFlags & 0x0001:  # MOUSEEVENTF_MOVE
+                            win32api.SetCursorPos((screen_x, screen_y))
+                            return 1
+                        elif mi.dwFlags & 0x0002:  # MOUSEEVENTF_LEFTDOWN
+                            win32api.SetCursorPos((screen_x, screen_y))
+                            win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, screen_x, screen_y, 0, 0)
+                            return 1
+                        elif mi.dwFlags & 0x0004:  # MOUSEEVENTF_LEFTUP
+                            win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, screen_x, screen_y, 0, 0)
+                            return 1
+                            
+        except ImportError:
+            print("⚠️ win32api not available")
+        except Exception as e:
+            print(f"⚠️ win32api method failed: {e}")
+        
+        # Final fallback: Use alternative Windows API call
+        try:
+            # Try using SetCursorPos for moves and mouse_event for clicks
+            if len(inputs) > 0:
+                input_struct = inputs[0]
+                if hasattr(input_struct, '_input') and hasattr(input_struct._input, 'mi'):
+                    mi = input_struct._input.mi
+                    
+                    # Convert coordinates
+                    if mi.dwFlags & 0x8000:  # MOUSEEVENTF_ABSOLUTE
+                        screen_x = int((mi.dx * self.virtual_width) / 65536) + self.virtual_left
+                        screen_y = int((mi.dy * self.virtual_height) / 65536) + self.virtual_top
+                        
+                        if mi.dwFlags & 0x0001:  # MOUSEEVENTF_MOVE
+                            result = self.user32.SetCursorPos(screen_x, screen_y)
+                            return 1 if result else 0
+                        else:
+                            # For mouse button events, use mouse_event API
+                            self.user32.SetCursorPos(screen_x, screen_y)
+                            
+                            if mi.dwFlags & 0x0002:  # MOUSEEVENTF_LEFTDOWN
+                                self.user32.mouse_event(0x0002, 0, 0, 0, 0)  # MOUSEEVENTF_LEFTDOWN
+                                return 1
+                            elif mi.dwFlags & 0x0004:  # MOUSEEVENTF_LEFTUP  
+                                self.user32.mouse_event(0x0004, 0, 0, 0, 0)  # MOUSEEVENTF_LEFTUP
+                                return 1
+                                
+        except Exception as e:
+            print(f"⚠️ Alternative API method failed: {e}")
+        
+        # If all methods fail, raise error
+        print("❌ ALL WINDOWS API METHODS FAILED")
+        print("� VirtualMouse requires Windows API access - try running as administrator")
+        raise RuntimeError("VirtualMouse Windows API failure - no compatible method found")
     
     def _create_mouse_input(self, dx: int, dy: int, flags: int) -> INPUT:
         """Create a mouse input structure."""
@@ -122,7 +235,6 @@ class VirtualMouse:
         """Click at specific coordinates with hardware-level input."""
         # Move to position first
         self.move_to(x, y)
-        time.sleep(random.uniform(0.01, 0.03))  # Small random delay
         
         if button == 'left':
             down_flag = MOUSEEVENTF_LEFTDOWN
@@ -152,151 +264,26 @@ class VirtualMouse:
         up_input = self._create_mouse_input(abs_x, abs_y, up_flag | MOUSEEVENTF_ABSOLUTE)
         self._send_input(up_input)
     
-    def smooth_move_to(self, target_x: int, target_y: int, duration: Optional[float] = None):
+
+
+    def drag(self, start_x: int, start_y: int, end_x: int, end_y: int, duration: float = 0.1):
         """
-        Smoothly move mouse to target position with human-like curves.
-        Uses hardware-level input for maximum stealth.
-        """
-        start_x, start_y = self.get_cursor_pos()
-        
-        # Calculate distance and auto-adjust duration if not specified
-        distance = math.sqrt((target_x - start_x) ** 2 + (target_y - start_y) ** 2)
-        if duration is None:
-            # Fast but natural movement timing
-            duration = min(0.05 + distance * 0.0003, 0.25)
-        
-        # Add slight random variation
-        duration = duration * random.uniform(0.9, 1.1)
-        
-        # Calculate number of steps for smooth movement
-        steps = max(8, int(duration * 80))  # Higher frequency for smoother movement
-        
-        # Generate bezier curve control points for natural movement
-        control_factor = random.uniform(0.05, 0.12)
-        mid_x = (start_x + target_x) / 2 + random.randint(-8, 8) * control_factor
-        mid_y = (start_y + target_y) / 2 + random.randint(-8, 8) * control_factor
-        
-        for i in range(steps + 1):
-            progress = i / steps
-            
-            # Smooth acceleration/deceleration (ease-in-out)
-            smooth_progress = 0.5 - 0.5 * math.cos(progress * math.pi)
-            
-            # Quadratic bezier curve
-            t = smooth_progress
-            x = (1-t)**2 * start_x + 2*(1-t)*t * mid_x + t**2 * target_x
-            y = (1-t)**2 * start_y + 2*(1-t)*t * mid_y + t**2 * target_y
-            
-            # Add micro-jitter for realism
-            jitter_x = random.uniform(-0.3, 0.3)
-            jitter_y = random.uniform(-0.3, 0.3)
-            
-            final_x = int(x + jitter_x)
-            final_y = int(y + jitter_y)
-            
-            # Use hardware-level movement
-            self.move_to(final_x, final_y)
-            
-            # Variable timing for natural movement
-            step_delay = duration / steps
-            step_delay *= random.uniform(0.8, 1.2)
-            time.sleep(step_delay)
-    
-    def human_click(self, x: int, y: int, button: str = 'left'):
-        """
-        Perform human-like click with random patterns using hardware input.
-        """
-        # Add small random offset
-        offset_x = random.randint(-2, 2)
-        offset_y = random.randint(-2, 2)
-        final_x = x + offset_x
-        final_y = y + offset_y
-        
-        # Smooth movement to target
-        self.smooth_move_to(final_x, final_y)
-        
-        # Random pre-click pause
-        time.sleep(random.uniform(0.03, 0.08))
-        
-        # Random click pattern
-        click_pattern = random.randint(1, 4)
-        
-        if click_pattern == 1:
-            # Quick single click
-            self.click_at(final_x, final_y, button, random.uniform(0.04, 0.07))
-            
-        elif click_pattern == 2:
-            # Double click (sometimes humans do this)
-            self.click_at(final_x, final_y, button, random.uniform(0.03, 0.05))
-            time.sleep(random.uniform(0.02, 0.04))
-            self.click_at(final_x, final_y, button, random.uniform(0.03, 0.05))
-            
-        elif click_pattern == 3:
-            # Held click
-            self.click_at(final_x, final_y, button, random.uniform(0.08, 0.14))
-            
-        else:
-            # Normal click with variation
-            self.click_at(final_x, final_y, button, random.uniform(0.05, 0.09))
-        
-        # Random post-click pause
-        time.sleep(random.uniform(0.08, 0.15))
-        
-        return True
-    
-    def drag(self, start_x: int, start_y: int, end_x: int, end_y: int, duration: float = 1.0):
-        """
-        Perform drag operation using hardware input.
+        Perform direct drag operation using hardware input.
         """
         # Move to start position
-        self.smooth_move_to(start_x, start_y)
-        time.sleep(random.uniform(0.05, 0.1))
-        
-        # Convert to absolute coordinates for start position
-        virtual_start_x = start_x - self.virtual_left
-        virtual_start_y = start_y - self.virtual_top
-        abs_start_x = int((virtual_start_x * 65535) / self.virtual_width)
-        abs_start_y = int((virtual_start_y * 65535) / self.virtual_height)
+        self.move_to(start_x, start_y)
         
         # Mouse down at start
-        down_input = self._create_mouse_input(
-            abs_start_x, abs_start_y, 
-            MOUSEEVENTF_LEFTDOWN | MOUSEEVENTF_ABSOLUTE
-        )
-        self._send_input(down_input)
+        self.mouse_down(start_x, start_y, 'left')
         
-        # Drag to end position
-        steps = max(10, int(duration * 60))
+        # Hold briefly
+        time.sleep(duration)
         
-        for i in range(steps):
-            progress = (i + 1) / steps
-            # Smooth progress curve
-            smooth_progress = 0.5 - 0.5 * math.cos(progress * math.pi)
-            
-            x = start_x + (end_x - start_x) * smooth_progress
-            y = start_y + (end_y - start_y) * smooth_progress
-            
-            # Add slight jitter during drag
-            jitter_x = random.uniform(-0.5, 0.5)
-            jitter_y = random.uniform(-0.5, 0.5)
-            
-            final_x = int(x + jitter_x)
-            final_y = int(y + jitter_y)
-            
-            self.move_to(final_x, final_y)
-            time.sleep(duration / steps * random.uniform(0.8, 1.2))
+        # Move directly to end position
+        self.move_to(end_x, end_y)
         
         # Mouse up at end
-        virtual_end_x = end_x - self.virtual_left
-        virtual_end_y = end_y - self.virtual_top
-        abs_end_x = int((virtual_end_x * 65535) / self.virtual_width)
-        abs_end_y = int((virtual_end_y * 65535) / self.virtual_height)
-        
-        up_input = self._create_mouse_input(
-            abs_end_x, abs_end_y, 
-            MOUSEEVENTF_LEFTUP | MOUSEEVENTF_ABSOLUTE
-        )
-        self._send_input(up_input)
+        self.mouse_up(end_x, end_y, 'left')
     
     def mouse_down(self, x: int, y: int, button: str = 'left'):
         """Press mouse button down at specified coordinates."""
