@@ -5,6 +5,7 @@ Handles finding Roblox window and getting its proper coordinates
 
 import win32gui
 import win32con
+import win32process
 import pyautogui
 import time
 
@@ -23,23 +24,43 @@ class RobloxWindowManager:
         def enum_callback(hwnd, results):
             if win32gui.IsWindowVisible(hwnd):
                 window_title = win32gui.GetWindowText(hwnd).lower()
-                if 'roblox' in window_title and 'blox fruits' in window_title:
-                    results.append((hwnd, win32gui.GetWindowText(hwnd)))
-                elif 'roblox' in window_title:
-                    # Also add generic Roblox windows as backup
-                    results.append((hwnd, win32gui.GetWindowText(hwnd)))
+                
+                # Get the process name to distinguish Roblox app from browsers
+                try:
+                    import psutil
+                    _, pid = win32process.GetWindowThreadProcessId(hwnd)
+                    process = psutil.Process(pid)
+                    process_name = process.name().lower()
+                    
+                    # Only accept windows from actual Roblox processes, not browsers
+                    if ('roblox' in window_title and 
+                        ('roblox' in process_name or 'robloxplayerbeta' in process_name) and
+                        not any(browser in process_name for browser in ['opera', 'chrome', 'firefox', 'edge', 'safari', 'brave'])):
+                        
+                        # Prefer Blox Fruits specifically, but accept any Roblox game
+                        if 'blox fruits' in window_title:
+                            results.insert(0, (hwnd, win32gui.GetWindowText(hwnd)))  # Priority insert
+                        else:
+                            results.append((hwnd, win32gui.GetWindowText(hwnd)))
+                            
+                except (ImportError, Exception):
+                    # Fallback: Use stricter window title matching if psutil not available
+                    if ('roblox' in window_title and 
+                        not any(browser in window_title for browser in ['opera', 'chrome', 'firefox', 'edge', 'safari', 'brave']) and
+                        'browser' not in window_title):
+                        
+                        if 'blox fruits' in window_title:
+                            results.insert(0, (hwnd, win32gui.GetWindowText(hwnd)))  # Priority insert
+                        else:
+                            results.append((hwnd, win32gui.GetWindowText(hwnd)))
             return True
         
         try:
             win32gui.EnumWindows(enum_callback, roblox_windows)
             
             if roblox_windows:
-                # Prefer Blox Fruits window, fall back to any Roblox window
-                blox_fruits_windows = [w for w in roblox_windows if 'blox fruits' in w[1].lower()]
-                if blox_fruits_windows:
-                    self.roblox_hwnd, title = blox_fruits_windows[0]
-                else:
-                    self.roblox_hwnd, title = roblox_windows[0]
+                # Windows are already prioritized (Blox Fruits first, then other Roblox games)
+                self.roblox_hwnd, title = roblox_windows[0]
                 
                 # Get window rectangle
                 self.window_rect = win32gui.GetWindowRect(self.roblox_hwnd)

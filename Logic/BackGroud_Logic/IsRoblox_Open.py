@@ -722,5 +722,145 @@ def main():
     print(f"Message: {status['message']}")
 
 
+def find_roblox_window():
+    """Find the Roblox window handle and title."""
+    import win32gui
+    import win32con
+    
+    roblox_windows = []
+    
+    def enum_callback(hwnd, results):
+        if win32gui.IsWindowVisible(hwnd):
+            window_title = win32gui.GetWindowText(hwnd).lower()
+            if 'roblox' in window_title:
+                results.append((hwnd, win32gui.GetWindowText(hwnd)))
+        return True
+    
+    win32gui.EnumWindows(enum_callback, roblox_windows)
+    return roblox_windows
+
+
+def bring_roblox_to_front():
+    """Find and bring Roblox window to the foreground using multiple methods."""
+    import win32gui
+    import win32con
+    import time
+    
+    # Try using window manager if available
+    try:
+        from . import WindowManager
+        if hasattr(WindowManager, 'ensure_roblox_focused'):
+            return WindowManager.ensure_roblox_focused()
+    except ImportError:
+        pass
+    
+    # Fallback to original method
+    roblox_windows = find_roblox_window()
+    
+    if not roblox_windows:
+        return False
+    
+    # Use the first Roblox window found
+    hwnd, title = roblox_windows[0]
+    
+    try:
+        # Method 1: Try standard Windows API
+        if win32gui.IsIconic(hwnd):
+            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+            time.sleep(0.2)
+        
+        # Try multiple methods to bring window to front
+        success = False
+        
+        try:
+            win32gui.SetForegroundWindow(hwnd)
+            success = True
+        except Exception as e:
+            pass
+        
+        if not success:
+            try:
+                # Alternative method: Use ShowWindow
+                win32gui.ShowWindow(hwnd, win32con.SW_SHOW)
+                win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                win32gui.BringWindowToTop(hwnd)
+                success = True
+            except Exception as e:
+                pass
+        
+        if not success:
+            try:
+                # Method 3: Try VirtualMouse if available
+                from . import VirtualMouse
+                if hasattr(VirtualMouse, 'virtual_mouse'):
+                    virtual_mouse = VirtualMouse.virtual_mouse
+                    rect = win32gui.GetWindowRect(hwnd)
+                    center_x = (rect[0] + rect[2]) // 2
+                    center_y = (rect[1] + rect[3]) // 2
+                    
+                    # Click on window center to focus it
+                    virtual_mouse.click_at(center_x, center_y)
+                    time.sleep(0.5)
+                    success = True
+            except Exception as e:
+                pass
+        
+        if success:
+            time.sleep(0.5)  # Give window time to come to front
+            return True
+        else:
+            return False
+    
+    except Exception as e:
+        return False
+
+
+def validate_roblox_and_game():
+    """Check if Roblox is running, in foreground, and playing Blox Fruits.
+    Enhanced for Roblox update - more forgiving when API endpoints fail.
+    """
+    import win32gui
+    
+    try:
+        checker = RobloxChecker()
+        
+        # Check if Roblox is running
+        if not checker.is_roblox_running():
+            print("ERROR: Roblox is not running!")
+            return False
+        
+        # Try API detection, but allow graceful fallback if APIs fail (Roblox update issue)
+        try:
+            game_result = checker.detect_game_via_api()
+            if isinstance(game_result, tuple):
+                is_blox, game_name, _ = game_result
+                if is_blox:
+                    print(f"✅ Confirmed Blox Fruits via API: {game_name}")
+                    return True
+                else:
+                    print(f"⚠️ API says not Blox Fruits: {game_name}")
+                    # Continue to fallback validation
+            else:
+                print("⚠️ API detection failed - using fallback validation")
+        except Exception as api_error:
+            print(f"⚠️ API detection error: {api_error} - using fallback validation")
+        
+        # Fallback validation: Just check if Roblox window exists and is focused
+        # This is more lenient for when Roblox updates break API detection
+        foreground_hwnd = win32gui.GetForegroundWindow()
+        foreground_title = win32gui.GetWindowText(foreground_hwnd).lower()
+        
+        if 'roblox' in foreground_title:
+            print("✅ Roblox window detected and focused - assuming Blox Fruits (API fallback)")
+            return True
+        else:
+            print("❌ Roblox window not in foreground")
+            return False
+        
+    except Exception as e:
+        print(f"❌ Validation error: {e}")
+        return False
+
+
 if __name__ == "__main__":
     main()

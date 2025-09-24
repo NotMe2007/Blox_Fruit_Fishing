@@ -7,6 +7,7 @@ import random
 import math
 import win32gui
 from pathlib import Path
+import importlib.util
 
 # Import virtual mouse driver
 virtual_mouse = None
@@ -33,6 +34,48 @@ except ImportError:
         VIRTUAL_MOUSE_AVAILABLE = False
 
 pyautogui.FAILSAFE = True
+
+# Cache for detector module to prevent reloading
+_detector_module_cache = None
+
+def get_detector_module():
+    """Lazily load the FishingRodDetector module.
+
+    Returns the loaded module. Raises RuntimeError if the detector cannot be found
+    or loaded. This avoids printing or exiting during import-time of this module.
+    """
+    global _detector_module_cache
+    if _detector_module_cache is not None:
+        return _detector_module_cache
+        
+    detector_path = Path(__file__).resolve()  # This module itself
+    
+    spec = importlib.util.spec_from_file_location('frod', str(detector_path))
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"failed to create import spec for: {detector_path}")
+
+    module = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(module)
+    except Exception as e:
+        raise RuntimeError(f"failed to load detector module: {e}")
+
+    _detector_module_cache = module
+    return module
+
+
+def screen_region_image():
+    """Capture a screenshot of the fishing rod detection region."""
+    left = max(0, TOP_LEFT[0])
+    top = max(0, TOP_LEFT[1])
+    right = max(left + 1, BOTTOM_RIGHT[0])
+    bottom = max(top + 1, BOTTOM_RIGHT[1])
+    w = right - left
+    h = bottom - top
+    pil = pyautogui.screenshot(region=(left, top, w, h))
+    img = cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    return img, gray, left, top
 
 
 def smooth_move_to(target_x, target_y, duration=None):
@@ -187,17 +230,47 @@ def check_region_and_act():
         False: EQ (equipped) rod detected - ready to fish
         None: No clear detection
     """
-    # Quick validation - check if Roblox window is in foreground
+    # Quick validation - check if Roblox window is available (but don't require foreground)
     try:
         foreground_hwnd = win32gui.GetForegroundWindow()
         foreground_title = win32gui.GetWindowText(foreground_hwnd).lower()
         
+        # Only warn if Roblox not in foreground, but don't skip detection
         if 'roblox' not in foreground_title:
-            print("WARNING: Roblox is not in foreground. Skipping rod detection.")
-            return None
+            # Check if Roblox window exists at all
+            roblox_found = False
+            def enum_windows_callback(hwnd, windows):
+                if win32gui.IsWindowVisible(hwnd):
+                    title = win32gui.GetWindowText(hwnd).lower()
+                    
+                    # Only accept actual Roblox application windows, not browser tabs
+                    if 'roblox' in title and not any(browser in title for browser in ['opera', 'chrome', 'firefox', 'edge', 'safari', 'brave']):
+                        # Additional check: try to verify it's the actual Roblox process
+                        try:
+                            import win32process
+                            import psutil
+                            _, pid = win32process.GetWindowThreadProcessId(hwnd)
+                            process = psutil.Process(pid)
+                            process_name = process.name().lower()
+                            
+                            if 'roblox' in process_name or 'robloxplayerbeta' in process_name:
+                                windows.append((hwnd, title))
+                        except (ImportError, Exception):
+                            # Fallback: accept if title looks like Roblox app (not browser)
+                            if 'browser' not in title:
+                                windows.append((hwnd, title))
+                return True
+            
+            windows = []
+            win32gui.EnumWindows(enum_windows_callback, windows)
+            
+            if not windows:
+                print("WARNING: No Roblox window found. Skipping rod detection.")
+                return None
+            # Continue with detection even if not in foreground
     except Exception as e:
-        print(f"Error checking foreground window: {e}")
-        return None
+        print(f"Error checking window state: {e}")
+        # Continue anyway - don't let window check failure stop detection
     
     try:
         un_gray, eq_gray = load_templates()
@@ -262,12 +335,19 @@ def check_region_and_act():
         # Use virtual mouse driver for undetectable input
         if VIRTUAL_MOUSE_AVAILABLE and virtual_mouse is not None:
             print("Using virtual mouse driver for hardware-level input")
-            success = virtual_mouse.human_click(click_x, click_y)
-            if success:
-                print(f'Virtual mouse click performed at ({click_x}, {click_y})')
-                return True
-            else:
-                print("Virtual mouse click failed, falling back to pyautogui")
+            
+            # Add small random offset for more natural clicking
+            offset_x = random.randint(-3, 3)
+            offset_y = random.randint(-3, 3)
+            final_click_x = click_x + offset_x
+            final_click_y = click_y + offset_y
+            
+            # Perform the click with slight delay to ensure it registers
+            virtual_mouse.click_at(final_click_x, final_click_y)
+            time.sleep(0.1)  # Small delay after click
+            
+            print(f'Virtual mouse click performed at ({final_click_x}, {final_click_y})')
+            return True
         
         # Fallback to regular mouse if virtual mouse fails
         print("Using fallback pyautogui input")
@@ -341,7 +421,6 @@ def safe_load_template(path):
     return None
 
 try:
-    FISH_ON_HOOK_TPL = safe_load_template(IMAGES_DIR / 'Fish_On_Hook.jpg')
     FISH_LEFT_TPL = safe_load_template(IMAGES_DIR / 'Fish_Left.png')
     FISH_RIGHT_TPL = safe_load_template(IMAGES_DIR / 'Fish_Right.png')
     SHIFT_LOCK_TPL = safe_load_template(IMAGES_DIR / 'Shift_Lock.png')
@@ -349,7 +428,6 @@ try:
     POWER_ACTIVE_TPL = safe_load_template(IMAGES_DIR / 'Power_Active.png')
 except Exception as e:
     print(f"Warning: Could not load some template images: {e}")
-    FISH_ON_HOOK_TPL = None
     FISH_LEFT_TPL = None
     FISH_RIGHT_TPL = None
     SHIFT_LOCK_TPL = None
