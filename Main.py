@@ -22,7 +22,7 @@ except Exception:
     ctk = None
 
 # Import the Roblox checker
-from Logic.BackGroud_Logic.IsRoblox_Open import check_roblox_and_game
+from Logic.BackGround_Logic.IsRoblox_Open import check_roblox_and_game
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -299,7 +299,7 @@ class LauncherApp(_BaseLauncher):
 
     def _wait_for_blox_fruits(self):
         """Wait for user to open Blox Fruits, then automatically start the script."""
-        from Logic.BackGroud_Logic.IsRoblox_Open import RobloxChecker
+        from Logic.BackGround_Logic.IsRoblox_Open import RobloxChecker
         
         try:
             checker = RobloxChecker()

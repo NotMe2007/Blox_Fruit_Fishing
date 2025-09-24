@@ -19,7 +19,7 @@ virtual_mouse = None
 VIRTUAL_MOUSE_AVAILABLE = False
 
 try:
-    from BackGroud_Logic.VirtualMouse import VirtualMouse
+    from BackGround_Logic.Virtual_Mouse import VirtualMouse
     virtual_mouse = VirtualMouse()
     VIRTUAL_MOUSE_AVAILABLE = True
 except ImportError as e:
@@ -31,7 +31,7 @@ virtual_keyboard = None
 VIRTUAL_KEYBOARD_AVAILABLE = False
 
 try:
-    from BackGroud_Logic.VirtualKeyboard import VirtualKeyboard
+    from BackGround_Logic.Virtual_Keyboard import VirtualKeyboard
     virtual_keyboard = VirtualKeyboard()
     VIRTUAL_KEYBOARD_AVAILABLE = True
 except ImportError as e:
@@ -40,7 +40,7 @@ except ImportError as e:
 
 # Import window manager for proper Roblox window handling
 try:
-    from BackGroud_Logic.WindowManager import roblox_window_manager, get_roblox_coordinates, get_roblox_window_region, ensure_roblox_focused # type: ignore
+    from BackGround_Logic.Window_Manager import roblox_window_manager, get_roblox_coordinates, get_roblox_window_region, ensure_roblox_focused # type: ignore
     WINDOW_MANAGER_AVAILABLE = True
 except ImportError as e:
     WINDOW_MANAGER_AVAILABLE = False
@@ -54,7 +54,7 @@ except ImportError as e:
 
 # Import fishing rod detector functions
 try:
-    import BackGroud_Logic.FishingRodDetector as FishingRodDetector
+    import BackGround_Logic.Fishing_Rod_Detector as FishingRodDetector
     FISHING_ROD_DETECTOR_AVAILABLE = True
 except ImportError as e:
     FISHING_ROD_DETECTOR_AVAILABLE = False
@@ -63,7 +63,7 @@ except ImportError as e:
 
 # Import minigame functions
 try:
-    import BackGroud_Logic.Fishing_MiniGame as FishingMiniGame
+    import BackGround_Logic.Fishing_Mini_Game as FishingMiniGame
     FISHING_MINIGAME_AVAILABLE = True
 except ImportError as e:
     FISHING_MINIGAME_AVAILABLE = False
@@ -72,7 +72,7 @@ except ImportError as e:
 
 # Import Roblox detection functions
 try:
-    import BackGroud_Logic.IsRoblox_Open as IsRobloxOpen
+    import BackGround_Logic.Is_Roblox_Open as IsRobloxOpen
     ISROBLOX_OPEN_AVAILABLE = True
 except ImportError as e:
     ISROBLOX_OPEN_AVAILABLE = False
@@ -300,7 +300,12 @@ def _detect_fish_on_hook_template(region):
         try:
             import pyautogui
             screenshot = pyautogui.screenshot(region=region)
-            debug_path = IMAGES_DIR / 'debug_fish_detection_region.png'
+            
+            # Ensure debug directory exists
+            debug_dir = Path(__file__).parent.parent / 'debug'
+            debug_dir.mkdir(exist_ok=True)
+            
+            debug_path = debug_dir / 'fish_detection_region.png'
             screenshot.save(debug_path)
             print(f"🔍 DEBUG: Saved detection region screenshot to {debug_path}")
         except Exception as debug_e:

@@ -15,7 +15,7 @@ VIRTUAL_MOUSE_AVAILABLE = False
 
 try:
     # Try relative import first (when imported as package)
-    from .VirtualMouse import VirtualMouse
+    from .Virtual_Mouse import VirtualMouse
     virtual_mouse = VirtualMouse()
     VIRTUAL_MOUSE_AVAILABLE = True
 except ImportError:
@@ -26,7 +26,7 @@ except ImportError:
         current_dir = os.path.dirname(os.path.abspath(__file__))
         if current_dir not in sys.path:
             sys.path.insert(0, current_dir)
-        from VirtualMouse import VirtualMouse
+        from Virtual_Mouse import VirtualMouse
         virtual_mouse = VirtualMouse()
         VIRTUAL_MOUSE_AVAILABLE = True
     except ImportError:
@@ -316,8 +316,12 @@ def check_region_and_act():
             ew, eh = int(best_eq_size[0]), int(best_eq_size[1])
             cv2.rectangle(dbg, (ex, ey), (ex + ew, ey + eh), (0, 0, 255), 2)
             cv2.putText(dbg, f"EQ {best_eq_val:.2f}", (ex, max(5, ey - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,255), 1)
-        dbg_path = 'debug_region.png'
-        cv2.imwrite(dbg_path, dbg)
+        
+        # Save to debug directory
+        debug_dir = Path(__file__).parent.parent.parent / 'debug'
+        debug_dir.mkdir(exist_ok=True)
+        dbg_path = debug_dir / 'rod_detection_region.png'
+        cv2.imwrite(str(dbg_path), dbg)
         print(f'Saved debug image: {dbg_path}')
 
     # Decide - ensure all values are scalar
@@ -342,58 +346,43 @@ def check_region_and_act():
             final_click_x = click_x + offset_x
             final_click_y = click_y + offset_y
             
-            # Perform the click with slight delay to ensure it registers
-            virtual_mouse.click_at(final_click_x, final_click_y)
-            time.sleep(0.1)  # Small delay after click
+            print(f'🎯 Clicking rod at ({final_click_x}, {final_click_y}) with VirtualMouse')
             
-            print(f'Virtual mouse click performed at ({final_click_x}, {final_click_y})')
+            # Move to position first to ensure accuracy
+            virtual_mouse.move_to(final_click_x, final_click_y)
+            time.sleep(0.05)  # Brief pause after move
+            
+            # Perform the click with longer duration for better registration
+            virtual_mouse.click_at(final_click_x, final_click_y, duration=0.1)
+            print(f'✅ Virtual mouse click completed at ({final_click_x}, {final_click_y})')
+            
+            # Wait longer for Roblox to register the click
+            time.sleep(0.2)  # Increased delay for game to respond
+            
             return True
         
         # Fallback to regular mouse if virtual mouse fails
-        print("Using fallback pyautogui input")
+        print("🔄 Using fallback pyautogui input for rod clicking")
         offset_x = random.randint(-2, 2)
         offset_y = random.randint(-2, 2)
         final_x = click_x + offset_x
         final_y = click_y + offset_y
         
+        print(f'🎯 Moving to rod at ({final_x}, {final_y}) with PyAutoGUI')
         smooth_move_to(final_x, final_y)
-        time.sleep(random.uniform(0.05, 0.15))
+        time.sleep(random.uniform(0.1, 0.2))  # Longer pause for stability
         
-        # Super human-like click with varied patterns
-        click_type = random.randint(1, 3)
+        # Use a more reliable single click instead of random patterns
+        print(f'🖱️ Performing rod equip click...')
+        duration = random.uniform(0.08, 0.15)  # Longer click duration
+        pyautogui.mouseDown(final_x, final_y, button='left')
+        time.sleep(duration)
+        pyautogui.mouseUp(final_x, final_y, button='left')
         
-        if click_type == 1:
-            # Quick single click
-            duration = random.uniform(0.04, 0.08)
-            pyautogui.mouseDown(final_x, final_y, button='left')
-            time.sleep(duration)
-            pyautogui.mouseUp(final_x, final_y, button='left')
-            
-        elif click_type == 2:
-            # Double click (sometimes humans do this accidentally)
-            duration1 = random.uniform(0.03, 0.06)
-            pyautogui.mouseDown(final_x, final_y, button='left')
-            time.sleep(duration1)
-            pyautogui.mouseUp(final_x, final_y, button='left')
-            
-            time.sleep(random.uniform(0.02, 0.05))  # Brief pause
-            
-            duration2 = random.uniform(0.03, 0.06)
-            pyautogui.mouseDown(final_x, final_y, button='left')
-            time.sleep(duration2)
-            pyautogui.mouseUp(final_x, final_y, button='left')
-            
-        else:
-            # Click with slight hold
-            duration = random.uniform(0.08, 0.15)
-            pyautogui.mouseDown(final_x, final_y, button='left')
-            time.sleep(duration)
-            pyautogui.mouseUp(final_x, final_y, button='left')
+        print(f'✅ PyAutoGUI click completed at ({final_x}, {final_y})')
         
-        print(f'Human-like click performed at ({final_x}, {final_y}) pattern: {click_type}')
-        
-        # Random pause after click to simulate human behavior
-        time.sleep(random.uniform(0.15, 0.4))
+        # Wait longer for game to register the click
+        time.sleep(random.uniform(0.2, 0.4))
         return True
 
     if (best_eq_loc is not None and best_eq_size is not None and 
