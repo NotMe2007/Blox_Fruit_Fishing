@@ -1,38 +1,23 @@
 """
-Minigame logic ported from the AutoHotkey fishing macro.
+Fishing minigame logic ported from FischV12.ahk
 
-This module implements a configuration-driven controller that decides corrective
-actions for a minigame "indicator" (the moving cursor/needle inside a fish bar).
-It doesn't interact with GUI or input devices; it provides the decision logic
-(your AHK or other automation layer can call into this to get what to do next).
+This module implements the AHK fishing minigame logic with 6 action types:
+0 = stabilize (rapid clicking for minor correction)
+1 = stable left tracking (moderate left movement with counter-strafe)
+2 = stable right tracking (moderate right movement with counter-strafe)  
+3 = max left boundary (indicator too far right, strong left correction)
+4 = max right boundary (indicator too far left, strong right correction)
+5 = unstable left (aggressive left movement for unstable conditions)
+6 = unstable right (aggressive right movement for unstable conditions)
 
-Contract (inputs/outputs):
-- Inputs: minigame state described by a dict or named args:
-    - indicator: float (0..1) current normalized position of the indicator along the bar
-    - arrow: "left"|"right"|None (direction the game is pushing the indicator)
-    - stable: bool (whether the current state is "stable" or "unstable")
-    - delta_time: float seconds since last update (optional)
-- Outputs: action dict:
-    - action: "none"|"move_left"|"move_right"
-    - intensity: float (0..1) suggested strength / duration fraction
-    - note: optional human readable note
-
-Assumptions / simplifications vs original AHK script:
-- Positions are normalized to 0..1 (0 = left, 1 = right).
-- Fish bar is a centered subrange of the full bar; side bars and white bar logic
-  are approximated using ratios and tolerances from the original settings.
-- Multipliers/divisions are used to compute intensity as in the original script.
-
-Edge cases handled:
-- indicator outside 0..1 is clamped
-- missing arrow/stable state treated as conservative (smaller corrections)
+Contract:
+- Inputs: minigame state (indicator position, arrow direction, stable state)
+- Outputs: action dict with type, intensity, duration, and counter-strafe values
 
 Usage:
-    from minigame_logic import MinigameController
-    cfg = {...}
-    ctl = MinigameController(cfg)
-    action = ctl.decide(indicator=0.82, arrow='right', stable=False)
-
+    cfg = MinigameConfig()
+    controller = MinigameController(cfg)
+    decision = controller.decide(indicator=0.82, arrow='right', stable=False)
 """
 from dataclasses import dataclass, field
 from typing import Optional, Tuple, Dict
@@ -116,13 +101,12 @@ except ImportError:
         def ensure_roblox_focused():
             return False
 
-# Load minigame templates
+# Load minigame templates from Images directory
 IMAGES_DIR = Path(__file__).parent.parent.parent / 'Images'
 
 def safe_load_template(path):
-    """Safely load a template image, handling both None and empty array cases."""
+    """Load template image safely."""
     try:
-        # Load as color image first
         img = cv2.imread(str(path), cv2.IMREAD_COLOR)
         if img is not None and img.size > 0:
             return img
@@ -133,9 +117,8 @@ def safe_load_template(path):
     return None
 
 def safe_load_template_gray(path):
-    """Safely load a template as grayscale, handling both None and empty array cases."""
+    """Load template as grayscale safely."""
     try:
-        # Load as grayscale image
         img = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
         if img is not None and img.size > 0:
             return img
@@ -145,13 +128,13 @@ def safe_load_template_gray(path):
         print(f"❌ Template loading error: {path.name} - {e}")
     return None
 
-# Load minigame-related templates
+# Load minigame templates (AHK equivalent of image detection)
 try:
     MINIGAME_BAR_TPL = safe_load_template_gray(IMAGES_DIR / 'MiniGame_Bar.png')
     FISH_LEFT_TPL = safe_load_template(IMAGES_DIR / 'Fish_Left.png')
     FISH_RIGHT_TPL = safe_load_template(IMAGES_DIR / 'Fish_Right.png')
     
-    # Print template load status
+    # Print template status
     templates = [
         ("MiniGame_Bar.png", MINIGAME_BAR_TPL),
         ("Fish_Left.png", FISH_LEFT_TPL),
@@ -164,7 +147,7 @@ try:
                 shape_str = f"{template.shape[0]}x{template.shape[1]}x{template.shape[2]}"
             else:
                 shape_str = f"{template.shape[0]}x{template.shape[1]}"
-            debug_log(LogCategory.TEMPLATE, f"Template loaded: {name} (shape: {shape_str})")
+            debug_log(LogCategory.TEMPLATE_MATCHING, f"Template loaded: {name} (shape: {shape_str})")
         else:
             debug_log(LogCategory.ERROR, f"Template failed to load: {name}")
             
@@ -177,57 +160,57 @@ except Exception as e:
 
 @dataclass
 class MinigameConfig:
-    # Control stat from fishing rod (affects max duration calculations)
-    control: float = 0.0  # 0.15-0.25+ based on rod stats
+    # Control stat from fishing rod (Check the Control stat of your Rod!)
+    control: float = 0.0  
     
-    # Color detection tolerances (from AHK script)
-    fish_bar_color_tolerance: int = 5  # Brown fish color detection
-    white_bar_color_tolerance: int = 15  # White bar detection
-    arrow_color_tolerance: int = 6  # Arrow/indicator detection
+    # Color detection tolerances (AHK: FishBarColorTolerance, WhiteBarColorTolerance, ArrowColorTolerance)
+    fish_bar_color_tolerance: int = 5  
+    white_bar_color_tolerance: int = 15  
+    arrow_color_tolerance: int = 6  
     
-    # Tolerances (normalized units) - increased for better responsiveness
-    fish_bar_half_width: float = 0.12  # Increased from 0.08 - wider fish target area
-    white_bar_half_width: float = 0.03  # Increased from 0.02
+    # Tolerances (normalized units)
+    fish_bar_half_width: float = 0.12  
+    white_bar_half_width: float = 0.03  
 
-    # Scanning delay (used by callers, returned for reference) - from AHK: 10ms
-    scan_delay: float = 0.001  # 1ms converted to seconds
+    # Scanning delay (AHK: ScanDelay)
+    scan_delay: float = 0.01  
     
-    # Dynamic fish center position (can be updated during minigame)
-    fish_center: float = 0.5  # Default to center, updated by detection
-    last_known_fish_pos: float = 0.5  # Store last successful fish detection
+    # Dynamic fish center position
+    fish_center: float = 0.5  
+    last_known_fish_pos: float = 0.5  
 
-    # Side bar ratio and delay (from AHK script)
-    side_bar_ratio: float = 0.7  # AHK default
-    side_delay: float = 0.4  # 400ms converted to seconds
+    # Side bar ratio and delay (AHK: SideBarRatio, SideDelay)
+    side_bar_ratio: float = 0.7  
+    side_delay: float = 0.4  
 
-    # Stability multipliers/divisions (from AHK script - exact values)
-    stable_right_multiplier: float = 2.40
-    stable_right_division: float = 1.60
-    stable_left_multiplier: float = 1.1
+    # Stable multipliers/divisions (AHK: StableRightMultiplier, StableRightDivision, etc.)
+    stable_right_multiplier: float = 2.36
+    stable_right_division: float = 1.55
+    stable_left_multiplier: float = 1.211
     stable_left_division: float = 1.12
 
-    # Unstable multipliers/divisions (increased for more responsive movement)
-    unstable_right_multiplier: float = 2.2  # Increased from 1.8
-    unstable_right_division: float = 1.3
-    unstable_left_multiplier: float = 2.0   # Increased from 1.6
-    unstable_left_division: float = 1.2
+    # Unstable multipliers/divisions (AHK: UnstableRightMultiplier, UnstableRightDivision, etc.)
+    unstable_right_multiplier: float = 2.665  
+    unstable_right_division: float = 1.5
+    unstable_left_multiplier: float = 2.19   
+    unstable_left_division: float = 1.0
 
-    # Ankle-break multipliers (from AHK script - exact values)
-    right_ankle_break_multiplier: float = 0.40
-    left_ankle_break_multiplier: float = 0.10
+    # Ankle-break multipliers (AHK: RightAnkleBreakMultiplier, LeftAnkleBreakMultiplier)
+    right_ankle_break_multiplier: float = 0.75
+    left_ankle_break_multiplier: float = 0.45
 
-    # Pixel scaling and deadzone calculations (improved for better responsiveness)
-    pixel_scaling: float = 1.0  # will be calculated based on bar width
-    deadzone: float = 0.05      # Increased from 0.02 - larger stabilization zone
-    deadzone2: float = 0.15     # Increased from 0.04 - larger tracking zone
+    # Pixel scaling and deadzone calculations
+    pixel_scaling: float = 1.0  
+    deadzone: float = 0.05      
+    deadzone2: float = 0.15     
     
-    # Boundary calculations (normalized, adjusted for better responsiveness)
-    max_left_bar: float = 0.25   # Increased from 0.15 - wider left boundary
-    max_right_bar: float = 0.75  # Decreased from 0.85 - wider right boundary
+    # Boundary calculations (AHK: MaxLeftBar, MaxRightBar)
+    max_left_bar: float = 0.25   
+    max_right_bar: float = 0.75  
 
-    # Minimal action intensity and max clamp (increased for more responsiveness)
-    min_intensity: float = 0.15  # Increased from 0.05
-    max_intensity: float = 1.5   # Increased from 1.0 for stronger actions
+    # Action intensity limits
+    min_intensity: float = 0.15  
+    max_intensity: float = 1.5
 
 
 class MinigameController:
@@ -240,7 +223,7 @@ class MinigameController:
         return max(0.0, min(1.0, v))
 
     def _compute_target(self) -> float:
-        # The fish bar position - can be dynamic based on fish detection
+        # The fish bar position
         return self.cfg.fish_center
 
     def _inside_fish_bar(self, indicator: float) -> bool:
@@ -251,31 +234,23 @@ class MinigameController:
     def decide(self, indicator: float, arrow: Optional[str] = None, stable: bool = True,
                delta_time: Optional[float] = None) -> Dict:
         """
-        Decide corrective action based on AHK minigame logic with 6 action types.
+        AHK minigame decision logic with 6 action types:
         
-        Action types (matching AHK script):
-        0 = stabilize (short click for minor correction)
-        1 = stable left tracking (moderate left movement with counter-strafe)
-        2 = stable right tracking (moderate right movement with counter-strafe)
-        3 = max left boundary (indicator is too far right, strong left correction)
-        4 = max right boundary (indicator is too far left, strong right correction)
-        5 = unstable left (aggressive left movement for unstable conditions)
-        6 = unstable right (aggressive right movement for unstable conditions)
+        Action 0 = stabilize (rapid clicking for minor correction)
+        Action 1 = stable left tracking (moderate left with counter-strafe)
+        Action 2 = stable right tracking (moderate right with counter-strafe)
+        Action 3 = max left boundary (strong left correction)
+        Action 4 = max right boundary (strong right correction)
+        Action 5 = unstable left (aggressive left movement)
+        Action 6 = unstable right (aggressive right movement)
 
-        indicator: normalized 0..1 position (white bar position)
-        arrow: 'left'|'right' or None (game pushing direction)
-        stable: whether minigame is currently in a stable state
-        delta_time: time since last decision (for adaptive duration)
-
-        Returns a dict: {action, intensity, note, action_type, duration_factor}
+        Returns: {action, intensity, note, action_type, duration_factor}
         """
         indicator = self._clamp01(indicator)
         fish_center = self._compute_target()
         
         # Calculate direction from indicator to fish center
-        # Positive direction means we need to move RIGHT to reach fish
-        # Negative direction means we need to move LEFT to reach fish
-        direction = fish_center - indicator  # positive = need to move right, negative = need to move left
+        direction = fish_center - indicator  
         distance_factor = abs(direction) / self.cfg.white_bar_half_width
         
         print(f"🎯 Indicator: {indicator:.3f}, Fish: {fish_center:.3f}, Direction: {direction:.3f} ({'RIGHT' if direction > 0 else 'LEFT' if direction < 0 else 'CENTER'})")
@@ -284,9 +259,9 @@ class MinigameController:
         print(f"🔧 Config boundaries: left={self.cfg.max_left_bar}, right={self.cfg.max_right_bar}")
         debug_log(LogCategory.DEBUG, f"Config boundaries: left={self.cfg.max_left_bar}, right={self.cfg.max_right_bar}")
         
-        # Check boundary conditions (AHK Action 3 & 4) - based on indicator position
+        # Check boundary conditions (Action 3 & 4)
         if indicator < self.cfg.max_left_bar:
-            # Indicator is at extreme left - force right movement  
+            # Max right boundary action
             print(f"🚨 BOUNDARY: Indicator too far LEFT ({indicator:.3f} < {self.cfg.max_left_bar})")
             debug_log(LogCategory.MINIGAME, f"BOUNDARY: Indicator too far LEFT ({indicator:.3f} < {self.cfg.max_left_bar})")
             return {
@@ -297,7 +272,7 @@ class MinigameController:
                 "duration_factor": self.cfg.side_delay
             }
         elif indicator > self.cfg.max_right_bar:
-            # Indicator is at extreme right - force left movement
+            # Max left boundary action
             print(f"🚨 BOUNDARY: Indicator too far RIGHT ({indicator:.3f} > {self.cfg.max_right_bar})")
             debug_log(LogCategory.MINIGAME, f"BOUNDARY: Indicator too far RIGHT ({indicator:.3f} > {self.cfg.max_right_bar})")
             return {
@@ -310,20 +285,20 @@ class MinigameController:
         
         # Normal tracking logic based on deadzone thresholds
         if abs(direction) <= self.cfg.deadzone:
-            # AHK Action 0: Stabilize - rapid clicking at 5.6 CPS for stabilization
+            # Action 0: Stabilize
             return {
                 "action": "stabilize",
-                "intensity": 0.8,  # Higher intensity for better stabilization
+                "intensity": 0.8,  
                 "note": "stabilizing",
                 "action_type": 0,
-                "duration_factor": 0.178,  # 5.6 CPS = 1/5.6 = 0.178 seconds per click
-                "click_interval": 0.178,  # Time between clicks for continuous stabilization
-                "stabilize_duration": 1.0  # Total stabilization period
+                "duration_factor": 0.178,  
+                "click_interval": 0.178,  
+                "stabilize_duration": 1.0  
             }
             
         elif self.cfg.deadzone < abs(direction) <= self.cfg.deadzone2:
-            # AHK Action 1 & 2: Stable tracking
-            if direction < 0:  # Need to move LEFT (Action 1)
+            # Actions 1 & 2: Stable tracking
+            if direction < 0:  # Action 1: Stable left
                 intensity = abs(direction) * self.cfg.stable_left_multiplier * self.cfg.pixel_scaling
                 adaptive_duration = 0.5 + 0.5 * (distance_factor ** 1.2)
                 if distance_factor < 0.2:
@@ -339,7 +314,7 @@ class MinigameController:
                     "duration_factor": adaptive_duration,
                     "counter_strafe": adaptive_duration / self.cfg.stable_left_division
                 }
-            else:  # Need to move RIGHT (Action 2)
+            else:  # Action 2: Stable right
                 intensity = abs(direction) * self.cfg.stable_right_multiplier * self.cfg.pixel_scaling
                 adaptive_duration = 0.5 + 0.5 * (distance_factor ** 1.2)
                 if distance_factor < 0.2:
@@ -357,12 +332,11 @@ class MinigameController:
                 }
                 
         else:  # abs(direction) > deadzone2
-            # AHK Action 5 & 6: Unstable/aggressive tracking
-            if direction < 0:  # Need to move LEFT aggressively (Action 5)
-                # Calculate max duration based on Control stat (AHK style)
+            # Actions 5 & 6: Unstable/aggressive tracking
+            if direction < 0:  # Action 5: Unstable left
+                # Calculate max duration based on Control stat
                 min_duration = 0.01
-                # Use a base duration that scales with distance and control
-                base_duration = abs(direction) * 2.0  # Scale up for visible differences
+                base_duration = abs(direction) * 2.0  
                 if self.cfg.control >= 0.25:
                     max_duration = base_duration * 0.75
                 elif self.cfg.control >= 0.2:
@@ -384,11 +358,10 @@ class MinigameController:
                     "duration_factor": duration,
                     "counter_strafe": duration / self.cfg.unstable_left_division
                 }
-            else:  # Need to move RIGHT aggressively (Action 6)
-                # Calculate max duration based on Control stat (AHK style)
+            else:  # Action 6: Unstable right
+                # Calculate max duration based on Control stat
                 min_duration = 0.01
-                # Use a base duration that scales with distance and control
-                base_duration = abs(direction) * 2.0  # Scale up for visible differences
+                base_duration = abs(direction) * 2.0  
                 if self.cfg.control >= 0.25:
                     max_duration = base_duration * 0.75
                 elif self.cfg.control >= 0.2:
@@ -412,60 +385,51 @@ class MinigameController:
                 }
 
 
-# A simple step simulator to allow light unit testing or tuning
+# Simple step simulator for testing AHK logic
 def simulate(controller: MinigameController, initial_indicator: float,
              steps: int = 50, step_dt: float = 0.05, noise: float = 0.0) -> Tuple[float, list]:
     """
-    Simulate the indicator for a number of steps, applying controller.decide at each step.
-    This sim is simplistic: it applies the controller's intensity as a velocity toward center.
-
-    Returns the final indicator and a history of (indicator, action, intensity) tuples.
+    Simulate the minigame for testing purposes.
+    Returns final indicator position and history of actions.
     """
     import random
 
     indicator = controller._clamp01(initial_indicator)
     history = []
     for i in range(steps):
-        # For simulation, pretend arrow is random push
+        # Simulate random arrow/stable state if noise enabled
         arrow = random.choice([None, "left", "right"]) if noise > 0 else None
         stable = True if random.random() > 0.1 else False if noise > 0 else True
         decision = controller.decide(indicator=indicator, arrow=arrow, stable=stable, delta_time=step_dt)
 
-        # Convert intensity to a velocity toward center
+        # Convert decision to velocity
         if decision["action"] == "none":
             velocity = 0.0
         elif decision["action"] == "move_left":
-            velocity = -decision["intensity"] * 0.02  # tuning constant for sim
+            velocity = -decision["intensity"] * 0.02  
         else:
             velocity = decision["intensity"] * 0.02
 
-        # Arrow/environmental push (small)
+        # Environmental push
         env_push = 0.0
         if arrow == "left":
             env_push -= 0.01
         elif arrow == "right":
             env_push += 0.01
 
-        # Update indicator with velocity + environment + noise
+        # Update indicator
         indicator = controller._clamp01(indicator + velocity + env_push + (random.random() - 0.5) * noise)
         history.append((indicator, decision["action"], decision["intensity"]))
 
     return indicator, history
 
 
-# =============================================================================
-# MINIGAME DETECTION AND HANDLING FUNCTIONS
-# =============================================================================
+#======================================== MINIGAME DETECTION ========================================
 
 def detect_minigame_elements():
     """
-    Detect minigame UI elements using image-based detection in specific region.
-    Minigame bar spawns at coordinates (510, 794) to (1418, 855).
-    
-    Returns dict with:
-    - indicator_pos: float 0.0-1.0 (normalized position of white indicator)
-    - fish_pos: float 0.0-1.0 (normalized position of fish)
-    - minigame_active: bool (whether minigame UI is detected)
+    Detect minigame UI elements in the fishing bar region.
+    Returns: indicator_pos, fish_pos, minigame_active
     """
     try:
         # Updated minigame bar coordinates based on user-provided debug screenshot analysis
@@ -1239,19 +1203,19 @@ def execute_minigame_action(decision):
         print(f"Error executing minigame action: {e}")
 
 
-# Quick example / self-test
+# Quick self-test / example usage
 if __name__ == "__main__":
     cfg = MinigameConfig()
     ctl = MinigameController(cfg)
 
-    print("Example decisions:")
+    print("AHK Minigame Controller - Example decisions:")
     for pos in [0.02, 0.1, 0.3, 0.45, 0.6, 0.85, 0.98]:
         d = ctl.decide(indicator=pos, arrow=None, stable=True)
         print(f"pos={pos:.2f} -> {d}")
 
-    # Run a small simulation
+    # Run a small simulation to test AHK logic
     final, hist = simulate(ctl, initial_indicator=0.9, steps=40, noise=0.02)
-    print(f"Sim final indicator: {final:.3f}")
+    print(f"Simulation final indicator: {final:.3f}")
     print("Last 5 steps:")
     for x in hist[-5:]:
         print(x)
