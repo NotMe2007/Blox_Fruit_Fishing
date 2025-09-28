@@ -1,13 +1,24 @@
 """
 Window Manager for Roblox Focus and Screen Detection
 Handles finding Roblox window and getting its proper coordinates
+Uses VirtualMouse for undetectable input simulation
 """
 
 import win32gui
 import win32con
 import win32process
-import pyautogui
 import time
+
+# Virtual Mouse for undetectable input
+try:
+    from .Virtual_Mouse import VirtualMouse
+    VIRTUAL_MOUSE_AVAILABLE = True
+except ImportError:
+    try:
+        from Virtual_Mouse import VirtualMouse
+        VIRTUAL_MOUSE_AVAILABLE = True
+    except ImportError:
+        VIRTUAL_MOUSE_AVAILABLE = False
 
 # Debug Logger
 try:
@@ -35,6 +46,18 @@ class RobloxWindowManager:
         self.window_rect = None
         self.last_validation = 0
         self.validation_interval = 2.0  # Check window every 2 seconds
+        
+        # Initialize virtual mouse for undetectable input
+        if VIRTUAL_MOUSE_AVAILABLE:
+            try:
+                self.virtual_mouse = VirtualMouse()
+                debug_log(LogCategory.WINDOW_MANAGEMENT, "VirtualMouse initialized successfully")
+            except Exception as e:
+                debug_log(LogCategory.ERROR, f"Failed to initialize VirtualMouse: {e}")
+                self.virtual_mouse = None
+        else:
+            self.virtual_mouse = None
+            debug_log(LogCategory.WINDOW_MANAGEMENT, "VirtualMouse not available - using fallback methods")
     
     def find_roblox_window(self):
         """Find the active Roblox window and get its properties."""
@@ -160,38 +183,96 @@ class RobloxWindowManager:
             return False
     
     def bring_to_front(self):
-        """Bring the Roblox window to front and focus it."""
+        """Bring the Roblox window to front using human-like methods to avoid detection."""
         if not self.is_window_valid():
             if not self.find_roblox_window():
                 return False
         
         try:
-            # Restore if minimized
-            if win32gui.IsIconic(self.roblox_hwnd): # type: ignore
-                win32gui.ShowWindow(self.roblox_hwnd, win32con.SW_RESTORE)
-                time.sleep(0.5)
+            # Method 1: VirtualMouse gentle click (most undetectable)
+            if self.virtual_mouse:
+                debug_log(LogCategory.WINDOW_MANAGEMENT, "Attempting gentle focus via VirtualMouse...")
+                center_x, center_y = self.get_window_center()
+                if center_x and center_y:
+                    # Small random offset to appear more human
+                    import random
+                    offset_x = random.randint(-50, 50)
+                    offset_y = random.randint(-50, 50)
+                    
+                    # Get screen dimensions from VirtualMouse
+                    screen_width = self.virtual_mouse.primary_width
+                    screen_height = self.virtual_mouse.primary_height
+                    
+                    click_x = max(0, min(center_x + offset_x, screen_width - 1))
+                    click_y = max(0, min(center_y + offset_y, screen_height - 1))
+                    
+                    # VirtualMouse click with human-like timing
+                    duration = random.uniform(0.05, 0.15)
+                    self.virtual_mouse.click_at(click_x, click_y, duration=duration)
+                    time.sleep(random.uniform(0.2, 0.4))
+                    
+                    # Check if successful
+                    if self.is_roblox_focused():
+                        debug_log(LogCategory.WINDOW_MANAGEMENT, "✅ Roblox focused via VirtualMouse click")
+                        return True
             
-            # Try to bring to front
-            win32gui.SetForegroundWindow(self.roblox_hwnd) # pyright: ignore[reportArgumentType]
-            win32gui.BringWindowToTop(self.roblox_hwnd) # type: ignore
-            
-            debug_log(LogCategory.WINDOW_MANAGEMENT, "Roblox window brought to front")
-            return True
+            # Method 2: Alt-Tab simulation (keyboard-based, less detectable)
+            debug_log(LogCategory.WINDOW_MANAGEMENT, "Attempting focus via Alt-Tab simulation...")
+            return self._alt_tab_to_roblox()
             
         except Exception as e:
             debug_log(LogCategory.ERROR, f"Failed to bring Roblox to front: {e}")
-            # If API calls fail, try clicking on the window
-            try:
-                center_x, center_y = self.get_window_center()
-                if center_x and center_y:
-                    pyautogui.click(center_x, center_y)
-                    time.sleep(0.5)
-                    debug_log(LogCategory.WINDOW_MANAGEMENT, "Clicked Roblox window to focus it")
-                    return True
-            except Exception as e2:
-                debug_log(LogCategory.ERROR, f"Click focus also failed: {e2}")
-            
             return False
+    
+    def _alt_tab_to_roblox(self):
+        """Use Alt-Tab behavior to find and focus Roblox window."""
+        try:
+            # Import keyboard for key simulation
+            import keyboard
+            
+            # Get list of visible windows
+            visible_windows = []
+            def enum_callback(hwnd, results):
+                if win32gui.IsWindowVisible(hwnd) and win32gui.GetWindowText(hwnd):
+                    results.append((hwnd, win32gui.GetWindowText(hwnd)))
+                return True
+            
+            win32gui.EnumWindows(enum_callback, visible_windows)
+            
+            # Find Roblox window position in the list
+            roblox_index = -1
+            for i, (hwnd, title) in enumerate(visible_windows):
+                if hwnd == self.roblox_hwnd:
+                    roblox_index = i
+                    break
+            
+            if roblox_index == -1:
+                return False
+            
+            # Simulate Alt-Tab with precise timing
+            keyboard.press('alt')
+            time.sleep(0.05)
+            
+            # Tab the right number of times (with human-like pauses)
+            for _ in range(roblox_index + 1):
+                keyboard.press_and_release('tab')
+                time.sleep(0.08)  # Human-like tab timing
+            
+            time.sleep(0.1)
+            keyboard.release('alt')
+            time.sleep(0.2)
+            
+            # Verify success
+            if self.is_roblox_focused():
+                debug_log(LogCategory.WINDOW_MANAGEMENT, "Roblox focused via Alt-Tab simulation")
+                return True
+                
+        except ImportError:
+            debug_log(LogCategory.WINDOW_MANAGEMENT, "Keyboard library not available for Alt-Tab simulation")
+        except Exception as e:
+            debug_log(LogCategory.ERROR, f"Alt-Tab simulation failed: {e}")
+        
+        return False
     
     def is_roblox_focused(self):
         """Check if Roblox is currently the focused window."""

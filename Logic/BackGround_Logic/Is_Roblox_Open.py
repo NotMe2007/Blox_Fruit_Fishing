@@ -751,20 +751,20 @@ def find_roblox_window():
 
 
 def bring_roblox_to_front():
-    """Find and bring Roblox window to the foreground using multiple methods."""
+    """Find and bring Roblox window to the foreground using VirtualMouse for undetectable input."""
     import win32gui
-    import win32con
     import time
+    import random
     
-    # Try using window manager if available
+    # Try using window manager if available (preferred method)
     try:
-        from . import WindowManager
-        if hasattr(WindowManager, 'ensure_roblox_focused'):
-            return WindowManager.ensure_roblox_focused()
+        from . import Window_Manager
+        if hasattr(Window_Manager, 'ensure_roblox_focused'):
+            return Window_Manager.ensure_roblox_focused()
     except ImportError:
         pass
     
-    # Fallback to original method
+    # Fallback: Direct VirtualMouse focus method
     roblox_windows = find_roblox_window()
     
     if not roblox_windows:
@@ -774,29 +774,69 @@ def bring_roblox_to_front():
     hwnd, title = roblox_windows[0]
     
     try:
-        # Method 1: Try standard Windows API
-        if win32gui.IsIconic(hwnd):
-            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-            time.sleep(0.2)
-        
-        # Try multiple methods to bring window to front
-        success = False
-        
+        # Method 1: VirtualMouse click (hardware-level, undetectable)
         try:
-            win32gui.SetForegroundWindow(hwnd)
-            success = True
-        except Exception as e:
+            # Import VirtualMouse
+            try:
+                from .Virtual_Mouse import VirtualMouse
+                VIRTUAL_MOUSE_AVAILABLE = True
+            except ImportError:
+                try:
+                    from Virtual_Mouse import VirtualMouse
+                    VIRTUAL_MOUSE_AVAILABLE = True
+                except ImportError:
+                    VIRTUAL_MOUSE_AVAILABLE = False
+            
+            if VIRTUAL_MOUSE_AVAILABLE:
+                virtual_mouse = VirtualMouse()
+                
+                # Get window rect for click positioning
+                rect = win32gui.GetWindowRect(hwnd)
+                if rect and len(rect) == 4:
+                    left, top, right, bottom = rect
+                    
+                    # Click in a random spot within the window (human-like)
+                    click_x = left + random.randint(100, right - left - 100)
+                    click_y = top + random.randint(50, bottom - top - 50)
+                    
+                    # Ensure click is within screen bounds
+                    screen_width = virtual_mouse.primary_width
+                    screen_height = virtual_mouse.primary_height
+                    click_x = max(0, min(click_x, screen_width - 1))
+                    click_y = max(0, min(click_y, screen_height - 1))
+                    
+                    # VirtualMouse click with human-like timing
+                    duration = random.uniform(0.05, 0.15)
+                    virtual_mouse.click_at(click_x, click_y, duration=duration)
+                    time.sleep(random.uniform(0.2, 0.4))
+                    
+                    # Check if successful by seeing if window is now foreground
+                    foreground_hwnd = win32gui.GetForegroundWindow()
+                    if foreground_hwnd == hwnd:
+                        print("✅ Roblox focused successfully via VirtualMouse (undetectable)")
+                        return True
+                        
+        except Exception as click_error:
+            pass  # VirtualMouse method failed
+        
+        # Method 2: Just verify the window exists and let user focus manually
+        try:
+            # Check if window is visible and not minimized
+            if win32gui.IsWindow(hwnd) and win32gui.IsWindowVisible(hwnd):
+                print("🎯 Roblox window found. Please manually click on Roblox to focus it.")
+                print("💡 Using manual focus avoids all detection systems.")
+                return True  # Return true so script continues, but user needs to focus manually
+                
+        except Exception as check_error:
             pass
         
-        if not success:
-            try:
-                # Alternative method: Use ShowWindow
-                win32gui.ShowWindow(hwnd, win32con.SW_SHOW)
-                win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-                win32gui.BringWindowToTop(hwnd)
-                success = True
-            except Exception as e:
-                pass
+        # If all methods fail, return False
+        print("❌ Could not locate Roblox window. Please ensure Roblox is running.")
+        return False
+        
+    except Exception as general_error:
+        print(f"❌ Error attempting to focus Roblox: {general_error}")
+        return False
         
         if not success:
             try:
