@@ -1115,14 +1115,20 @@ def main_fishing_loop():
             current_time = time.time()
             if current_time - last_validation_time > validation_interval:
                 if not (ISROBLOX_OPEN_AVAILABLE and IsRobloxOpen and IsRobloxOpen.validate_roblox_and_game()):
-                    if not (ISROBLOX_OPEN_AVAILABLE and IsRobloxOpen and IsRobloxOpen.bring_roblox_to_front()):
-                        time.sleep(2)
+                    # Use gentle focus approach to avoid Roblox anti-cheat detection
+                    focus_result = ISROBLOX_OPEN_AVAILABLE and IsRobloxOpen and IsRobloxOpen.bring_roblox_to_front()
+                    if not focus_result:
+                        print("🔄 Please manually click on Roblox window to continue fishing...")
+                        time.sleep(3)  # Give user time to focus manually
                         continue
-                    # Wait a moment after bringing to front
-                    time.sleep(0.5)
-                    # Revalidate after bringing to front
+                    
+                    # Wait a moment after gentle focus attempt
+                    time.sleep(0.8)  # Slightly longer wait for human-like timing
+                    
+                    # Revalidate after focus attempt
                     if not (ISROBLOX_OPEN_AVAILABLE and IsRobloxOpen and IsRobloxOpen.validate_roblox_and_game()):
-                        time.sleep(2)
+                        print("📋 Roblox validation failed. Make sure you're in Blox Fruits and the game is active.")
+                        time.sleep(3)
                         continue
                 last_validation_time = current_time
             
