@@ -20,7 +20,7 @@ except ImportError:
         # Fallback log categories
         from enum import Enum
         class LogCategory(Enum):
-            MOUSE_INPUT = "MOUSE_INPUT"
+            MOUSE = "MOUSE"
             SYSTEM = "SYSTEM"
             ERROR = "ERROR"
         def debug_log(category, message):
@@ -115,34 +115,9 @@ class VirtualMouse:
         return point.x, point.y
     
     def _send_input(self, *inputs):
-        """Send input using simplified Windows API approach - more reliable than complex buffer method."""
-        import ctypes.wintypes
-        
+        """Simplified input method using basic Windows API calls."""
         try:
-            # Simplified approach: Use only the basic SendInput call
-            SendInput = ctypes.windll.user32.SendInput
-            
-            # Create array of INPUT structures
-            nInputs = len(inputs)
-            LPINPUT = INPUT * nInputs
-            input_array = LPINPUT(*inputs)
-            
-            # Call SendInput with properly typed parameters
-            result = SendInput(nInputs, input_array, ctypes.sizeof(INPUT))
-            
-            if result == nInputs:
-                return result
-            else:
-                debug_log(LogCategory.ERROR, f"⚠️ SendInput returned {result} (expected {nInputs})")
-                error_code = ctypes.windll.kernel32.GetLastError()
-                debug_log(LogCategory.ERROR, f"⚠️ Windows error code: {error_code}")
-                
-        except Exception as e:
-            debug_log(LogCategory.ERROR, f"⚠️ SendInput failed: {e}")
-            
-        # Fallback: Use direct Windows API calls (SetCursorPos + mouse_event)
-        try:
-            debug_log(LogCategory.MOUSE_INPUT, "🔄 Using direct API fallback...")
+            debug_log(LogCategory.MOUSE, "🔄 Using simplified mouse API...")
             
             for input_struct in inputs:
                 if hasattr(input_struct, '_input') and hasattr(input_struct._input, 'mi'):
@@ -153,30 +128,44 @@ class VirtualMouse:
                         screen_x = int((mi.dx * self.virtual_width) / 65536) + self.virtual_left
                         screen_y = int((mi.dy * self.virtual_height) / 65536) + self.virtual_top
                         
+                        # Ensure coordinates are within screen bounds
+                        screen_x = max(0, min(screen_x, self.virtual_width - 1))
+                        screen_y = max(0, min(screen_y, self.virtual_height - 1))
+                        
                         if mi.dwFlags & MOUSEEVENTF_MOVE:
                             # Move cursor
-                            result = self.user32.SetCursorPos(screen_x, screen_y)
-                            if result:
-                                debug_log(LogCategory.MOUSE_INPUT, f"✅ Moved cursor to ({screen_x}, {screen_y})")
-                                return 1
-                        elif mi.dwFlags & MOUSEEVENTF_LEFTDOWN:
-                            # Mouse button down
+                            self.user32.SetCursorPos(screen_x, screen_y)
+                            debug_log(LogCategory.MOUSE, f"✅ Moved cursor to ({screen_x}, {screen_y})")
+                        
+                        if mi.dwFlags & MOUSEEVENTF_LEFTDOWN:
+                            # Left mouse down
                             self.user32.SetCursorPos(screen_x, screen_y)
                             self.user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-                            debug_log(LogCategory.MOUSE_INPUT, f"✅ Left mouse down at ({screen_x}, {screen_y})")
-                            return 1
-                        elif mi.dwFlags & MOUSEEVENTF_LEFTUP:
-                            # Mouse button up
+                            debug_log(LogCategory.MOUSE, f"✅ Left mouse down at ({screen_x}, {screen_y})")
+                        
+                        if mi.dwFlags & MOUSEEVENTF_LEFTUP:
+                            # Left mouse up
                             self.user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-                            debug_log(LogCategory.MOUSE_INPUT, f"✅ Left mouse up")
-                            return 1
+                            debug_log(LogCategory.MOUSE, f"✅ Left mouse up")
+                        
+                        if mi.dwFlags & MOUSEEVENTF_RIGHTDOWN:
+                            # Right mouse down
+                            self.user32.SetCursorPos(screen_x, screen_y)
+                            self.user32.mouse_event(MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0)
+                            debug_log(LogCategory.MOUSE, f"✅ Right mouse down at ({screen_x}, {screen_y})")
+                        
+                        if mi.dwFlags & MOUSEEVENTF_RIGHTUP:
+                            # Right mouse up
+                            self.user32.mouse_event(MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0)
+                            debug_log(LogCategory.MOUSE, f"✅ Right mouse up")
+            
+            debug_log(LogCategory.MOUSE, "✅ Mouse input completed successfully")
+            return len(inputs)
                             
         except Exception as e:
-            debug_log(LogCategory.ERROR, f"⚠️ Direct API fallback failed: {e}")
-        
-        # If all methods fail
-        debug_log(LogCategory.ERROR, "❌ All mouse input methods failed")
-        return 0
+            debug_log(LogCategory.ERROR, f"⚠️ Mouse input failed: {e}")
+            debug_log(LogCategory.ERROR, "❌ All mouse input methods failed")
+            return 0
     
     def _create_mouse_input(self, dx: int, dy: int, flags: int) -> INPUT:
         """Create a mouse input structure."""
@@ -194,57 +183,91 @@ class VirtualMouse:
         return input_struct
     
     def move_to(self, x: int, y: int):
-        """Move mouse to absolute position using hardware-level input."""
-        # Convert screen coordinates to virtual desktop coordinates
-        virtual_x = x - self.virtual_left
-        virtual_y = y - self.virtual_top
-        
-        # Convert to absolute coordinates (0-65535 range) within virtual desktop
-        abs_x = int((virtual_x * 65535) / self.virtual_width)
-        abs_y = int((virtual_y * 65535) / self.virtual_height)
-        
-        # Create mouse move input
-        mouse_input = self._create_mouse_input(
-            abs_x, abs_y, 
-            MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK
-        )
-        
-        self._send_input(mouse_input)
+        """Move mouse to specific coordinates."""
+        try:
+            debug_log(LogCategory.MOUSE, f"Moving mouse to ({x}, {y})")
+            
+            # Ensure coordinates are within screen bounds
+            x = max(0, min(x, self.primary_width - 1))
+            y = max(0, min(y, self.primary_height - 1))
+            
+            # Use SetCursorPos for simple, reliable mouse movement
+            result = self.user32.SetCursorPos(x, y)
+            if result:
+                debug_log(LogCategory.MOUSE, f"✅ Mouse moved to ({x}, {y})")
+            else:
+                debug_log(LogCategory.ERROR, f"❌ Failed to move mouse to ({x}, {y})")
+                
+        except Exception as e:
+            debug_log(LogCategory.ERROR, f"❌ Move failed to ({x}, {y}): {e}")
+    
+    def smooth_move_to(self, x: int, y: int, duration: float = 0.3):
+        """Move mouse smoothly to coordinates for more human-like movement."""
+        try:
+            # Get current mouse position
+            current_pos = POINT()
+            self.user32.GetCursorPos(ctypes.byref(current_pos))
+            
+            start_x, start_y = current_pos.x, current_pos.y
+            target_x, target_y = x, y
+            
+            # Calculate steps for smooth movement
+            steps = max(10, int(duration * 60))  # 60 FPS smoothness
+            step_delay = duration / steps
+            
+            for i in range(steps + 1):
+                progress = i / steps
+                # Use easing function for more natural movement
+                ease_progress = progress * progress * (3 - 2 * progress)  # Smoothstep
+                
+                current_x = int(start_x + (target_x - start_x) * ease_progress)
+                current_y = int(start_y + (target_y - start_y) * ease_progress)
+                
+                self.user32.SetCursorPos(current_x, current_y)
+                
+                if i < steps:  # Don't sleep on last iteration
+                    time.sleep(step_delay)
+                    
+            debug_log(LogCategory.MOUSE, f"✅ Smooth move completed to ({x}, {y})")
+                    
+        except Exception as e:
+            debug_log(LogCategory.ERROR, f"❌ Smooth move failed to ({x}, {y}): {e}")
+            # Fallback to regular move
+            self.move_to(x, y)
     
     def click_at(self, x: int, y: int, button: str = 'left', duration: float = 0.05):
-        """Click at specific coordinates with hardware-level input."""
-        # Move to position first
-        self.move_to(x, y)
-        
-        if button == 'left':
-            down_flag = MOUSEEVENTF_LEFTDOWN
-            up_flag = MOUSEEVENTF_LEFTUP
-        elif button == 'right':
-            down_flag = MOUSEEVENTF_RIGHTDOWN
-            up_flag = MOUSEEVENTF_RIGHTUP
-        else:
-            raise ValueError("Button must be 'left' or 'right'")
-        
-        # Convert screen coordinates to virtual desktop coordinates
-        virtual_x = x - self.virtual_left
-        virtual_y = y - self.virtual_top
-        
-        # Convert to absolute coordinates (0-65535 range) within virtual desktop
-        abs_x = int((virtual_x * 65535) / self.virtual_width)
-        abs_y = int((virtual_y * 65535) / self.virtual_height)
-        
-        # Mouse down
-        down_input = self._create_mouse_input(abs_x, abs_y, down_flag | MOUSEEVENTF_ABSOLUTE)
-        self._send_input(down_input)
-        
-        # Hold for duration
-        time.sleep(duration)
-        
-        # Mouse up
-        up_input = self._create_mouse_input(abs_x, abs_y, up_flag | MOUSEEVENTF_ABSOLUTE)
-        self._send_input(up_input)
-    
-
+        """Simple and reliable click method using basic Windows API."""
+        try:
+            debug_log(LogCategory.MOUSE, f"🖱️ Clicking at ({x}, {y}) with {button} button")
+            
+            # Ensure coordinates are within screen bounds
+            x = max(0, min(x, self.primary_width - 1))
+            y = max(0, min(y, self.primary_height - 1))
+            
+            # Move to position first
+            self.user32.SetCursorPos(x, y)
+            time.sleep(0.01)  # Small delay to ensure position is set
+            
+            if button == 'left':
+                # Left click
+                self.user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+                time.sleep(duration)
+                self.user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+                debug_log(LogCategory.MOUSE, f"✅ Left click completed at ({x}, {y})")
+            elif button == 'right':
+                # Right click
+                self.user32.mouse_event(MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0)
+                time.sleep(duration)
+                self.user32.mouse_event(MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0)
+                debug_log(LogCategory.MOUSE, f"✅ Right click completed at ({x}, {y})")
+            else:
+                raise ValueError("Button must be 'left' or 'right'")
+                
+            return True
+            
+        except Exception as e:
+            debug_log(LogCategory.ERROR, f"❌ Click failed at ({x}, {y}): {e}")
+            return False
 
     def drag(self, start_x: int, start_y: int, end_x: int, end_y: int, duration: float = 0.1):
         """
