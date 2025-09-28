@@ -38,15 +38,16 @@ except ImportError:
         DEBUG_LOGGER_AVAILABLE = True
     except ImportError:
         DEBUG_LOGGER_AVAILABLE = False
-        # Fallback log categories
+        # Fallback log categories - match Debug_Logger.py
         from enum import Enum
         class LogCategory(Enum):
             SYSTEM = "SYSTEM"
-            MINIGAME_DECISIONS = "MINIGAME_DECISIONS"
-            MINIGAME_DETECTION = "MINIGAME_DETECTION"
+            MINIGAME = "MINIGAME"
             FISH_DETECTION = "FISH_DETECTION"
-            TEMPLATE_MATCHING = "TEMPLATE_MATCHING"
-            MOUSE_INPUT = "MOUSE_INPUT"
+            TEMPLATE = "TEMPLATE"
+            MOUSE = "MOUSE"
+            COORDINATES = "COORDS"
+            MINIGAME_DETECT = "GAME_DETECT"
             ERROR = "ERROR"
         def debug_log(category, message):
             print(f"[{category.value}] {message}")
@@ -60,7 +61,7 @@ _minigame_detection_failures = 0
 
 try:
     # Try relative import first (when imported as package)
-    from .VirtualMouse import VirtualMouse
+    from .Virtual_Mouse import VirtualMouse
     virtual_mouse = VirtualMouse()
     VIRTUAL_MOUSE_AVAILABLE = True
 except ImportError:
@@ -71,7 +72,7 @@ except ImportError:
         current_dir = os.path.dirname(os.path.abspath(__file__))
         if current_dir not in sys.path:
             sys.path.insert(0, current_dir)
-        from VirtualMouse import VirtualMouse
+        from Virtual_Mouse import VirtualMouse
         virtual_mouse = VirtualMouse()
         VIRTUAL_MOUSE_AVAILABLE = True
     except ImportError:
@@ -81,7 +82,8 @@ except ImportError:
 # Import window manager for proper Roblox window handling
 try:
     # Try relative import first (when imported as package)  
-    from .WindowManager import get_roblox_coordinates, ensure_roblox_focused
+    from .Window_Manager import RobloxWindowManager, get_roblox_coordinates, ensure_roblox_focused
+    window_manager = RobloxWindowManager()
     WINDOW_MANAGER_AVAILABLE = True
 except ImportError:
     try:
@@ -91,10 +93,12 @@ except ImportError:
         current_dir = os.path.dirname(os.path.abspath(__file__))
         if current_dir not in sys.path:
             sys.path.insert(0, current_dir)
-        from WindowManager import get_roblox_coordinates, ensure_roblox_focused
+        from Window_Manager import RobloxWindowManager, get_roblox_coordinates, ensure_roblox_focused
+        window_manager = RobloxWindowManager()
         WINDOW_MANAGER_AVAILABLE = True
     except ImportError:
         WINDOW_MANAGER_AVAILABLE = False
+        window_manager = None
         # Define dummy functions for fallback
         def get_roblox_coordinates():
             return None, None
@@ -147,7 +151,7 @@ try:
                 shape_str = f"{template.shape[0]}x{template.shape[1]}x{template.shape[2]}"
             else:
                 shape_str = f"{template.shape[0]}x{template.shape[1]}"
-            debug_log(LogCategory.TEMPLATE_MATCHING, f"Template loaded: {name} (shape: {shape_str})")
+            debug_log(LogCategory.TEMPLATE, f"Template loaded: {name} (shape: {shape_str})")
         else:
             debug_log(LogCategory.ERROR, f"Template failed to load: {name}")
             
@@ -216,6 +220,9 @@ class MinigameConfig:
 class MinigameController:
     def __init__(self, cfg: Optional[MinigameConfig] = None):
         self.cfg = cfg or MinigameConfig()
+        # Button state tracking for persistent holds (like AutoHotkey)
+        self.button_held = False
+        self.last_action_type = None
 
     def _clamp01(self, v: float) -> float:
         if v is None:
@@ -257,7 +264,7 @@ class MinigameController:
         debug_log(LogCategory.COORDINATES, f"Indicator: {indicator:.3f}, Fish: {fish_center:.3f}, Direction: {direction:.3f} ({'RIGHT' if direction > 0 else 'LEFT' if direction < 0 else 'CENTER'})")
         
         print(f"🔧 Config boundaries: left={self.cfg.max_left_bar}, right={self.cfg.max_right_bar}")
-        debug_log(LogCategory.DEBUG, f"Config boundaries: left={self.cfg.max_left_bar}, right={self.cfg.max_right_bar}")
+        debug_log(LogCategory.SYSTEM, f"Config boundaries: left={self.cfg.max_left_bar}, right={self.cfg.max_right_bar}")
         
         # Check boundary conditions (Action 3 & 4)
         if indicator < self.cfg.max_left_bar:
@@ -551,7 +558,7 @@ def detect_fish_position_image_based(screenshot_bgr):
             _, max_val_right, _, max_loc_right = cv2.minMaxLoc(result_right)
             
             # Use the better match if confidence is high enough
-            confidence_threshold = 0.6  # Lower threshold for faster detection
+            confidence_threshold = 0.4  # Lowered threshold for better detection
             if max_val_left > max_val_right and max_val_left > confidence_threshold:
                 fish_x = max_loc_left[0] + gray_left.shape[1] // 2
                 fish_pos = fish_x / screenshot_bgr.shape[1]
@@ -738,14 +745,14 @@ def detect_minigame_bar_presence(screenshot_bgr, require_fish_indicators=True):
                     _, max_val, _, _ = cv2.minMaxLoc(result)
                     best_confidence = max(best_confidence, max_val)
                     
-                    if max_val > 0.6:  # Reliable threshold
+                    if max_val > 0.45:  # Lowered threshold for better detection
                         fish_indicators_found += 1
                         fish_detection_confidence = max(fish_detection_confidence, max_val)
                         print(f"✅ Fish LEFT indicator detected! (scale={scale:.1f}, confidence: {max_val:.3f})")
                         break
                 
-                if best_confidence < 0.6:
-                    print(f"❌ Fish left indicator: best confidence {best_confidence:.3f} < 0.6")
+                if best_confidence < 0.45:
+                    print(f"❌ Fish left indicator: best confidence {best_confidence:.3f} < 0.45")
                     
             except Exception as e:
                 print(f"Fish left template matching error: {e}")
@@ -774,14 +781,14 @@ def detect_minigame_bar_presence(screenshot_bgr, require_fish_indicators=True):
                     _, max_val, _, _ = cv2.minMaxLoc(result)
                     best_confidence = max(best_confidence, max_val)
                     
-                    if max_val > 0.6:  # Reliable threshold
+                    if max_val > 0.45:  # Lowered threshold for better detection
                         fish_indicators_found += 1
                         fish_detection_confidence = max(fish_detection_confidence, max_val)
                         print(f"✅ Fish RIGHT indicator detected! (scale={scale:.1f}, confidence: {max_val:.3f})")
                         break
                 
-                if best_confidence < 0.6:
-                    print(f"❌ Fish right indicator: best confidence {best_confidence:.3f} < 0.6")
+                if best_confidence < 0.45:
+                    print(f"❌ Fish right indicator: best confidence {best_confidence:.3f} < 0.45")
                     
             except Exception as e:
                 print(f"Fish right template matching error: {e}")
@@ -791,12 +798,22 @@ def detect_minigame_bar_presence(screenshot_bgr, require_fish_indicators=True):
             print(f"🎣 ✅ FISHING MINIGAME CONFIRMED! Found {fish_indicators_found} fish indicator(s) (confidence: {fish_detection_confidence:.3f})")
             return True
         
-        # If fish indicators required but not found, return False
-        if require_fish_indicators:
+        # FALLBACK: Check if we have moderate confidence (0.3-0.45) indicators
+        # This addresses the case where confidence is 0.415-0.471 but below our 0.45 threshold
+        moderate_confidence_detected = False
+        if fish_detection_confidence >= 0.3:
+            print(f"🔶 Moderate confidence fish indicator detected: {fish_detection_confidence:.3f}")
+            moderate_confidence_detected = True
+        
+        # If fish indicators required but not found, return False (unless moderate confidence)
+        if require_fish_indicators and not moderate_confidence_detected:
             print("🚫 No fish indicators found - not a fishing minigame (avoiding false positive)")
             return False
         
         print("⚠️ Fish indicators not found, falling back to secondary detection methods...")
+        
+        # Initialize fallback detection variables
+        moderate_confidence_detected = False
         
         # FALLBACK METHOD: Template matching with MiniGame_Bar.png (less reliable)
         template_detected = False
@@ -820,7 +837,7 @@ def detect_minigame_bar_presence(screenshot_bgr, require_fish_indicators=True):
                     result = cv2.matchTemplate(gray, scaled_template, cv2.TM_CCOEFF_NORMED)
                     min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
                     
-                    if max_val >= 0.6:  # Lower threshold for more detection
+                    if max_val >= 0.4:  # Lowered threshold for better detection
                         print(f"✓ Minigame bar detected with template (scale={scale:.1f}, confidence: {max_val:.3f})")
                         template_detected = True
                         break
@@ -921,11 +938,15 @@ def detect_minigame_bar_presence(screenshot_bgr, require_fish_indicators=True):
         else:
             print(f"❌ Color-based detection failed: white_pixels={white_pixels}<={white_threshold}, colored_pixels={colored_pixels}<={colored_threshold}")
         
-        # Final fallback decision (only for compatibility when fish indicators disabled)
-        detected = template_detected or color_detected
+        # Final decision combines all methods
+        detected = template_detected or color_detected or moderate_confidence_detected
         
         if detected:
-            print("⚠️ Fallback detection positive - but WITHOUT fish indicators, this might be a false positive!")
+            if moderate_confidence_detected:
+                print("⚠️ ✅ MINIGAME LIKELY DETECTED - Moderate fish indicator confidence + fallback methods")
+                return True
+            else:
+                print("⚠️ Fallback detection positive - but WITHOUT fish indicators, this might be a false positive!")
         else:
             print("❌ All detection methods failed - no minigame found")
         
@@ -1056,11 +1077,18 @@ def handle_fishing_minigame(minigame_controller):
         return True  # End minigame on error
 
 
+# Global button state tracking for persistent holds (AutoHotkey compatibility)
+_BUTTON_HELD = False
+_LAST_ACTION_TYPE = None
+
 def execute_minigame_action(decision):
     """
     Execute AHK-style minigame actions with sophisticated timing and control.
     Uses only Windows API - NO PyAutoGUI to avoid detection.
+    Now includes persistent button state tracking like AutoHotkey.
     """
+    global _BUTTON_HELD, _LAST_ACTION_TYPE
+    
     try:
         print(f"🎮 Starting minigame action execution...")
         debug_log(LogCategory.MOUSE, "Starting minigame action execution...")
@@ -1088,6 +1116,11 @@ def execute_minigame_action(decision):
         action = decision.get("action")
         duration_factor = decision.get("duration_factor", 0.05)
         counter_strafe = decision.get("counter_strafe", 0)
+        
+        # Track action type changes for state management
+        if action_type != _LAST_ACTION_TYPE:
+            print(f"🔄 Action type changed: {_LAST_ACTION_TYPE} → {action_type}")
+            _LAST_ACTION_TYPE = action_type
         
         print(f"🎮 Minigame Action {action_type}: {action} (duration: {duration_factor:.3f}s)")
         debug_log(LogCategory.MINIGAME, f"Action {action_type}: {action} (duration: {duration_factor:.3f}s)")
@@ -1128,11 +1161,17 @@ def execute_minigame_action(decision):
                 
         elif action_type == 1:  # Stable left tracking
             try:
-                virtual_mouse.mouse_up(click_x, click_y, 'left')    # Ensure mouse up first
+                # Ensure mouse up first for left movement
+                if _BUTTON_HELD:
+                    virtual_mouse.mouse_up(click_x, click_y, 'left')
+                    _BUTTON_HELD = False
+                
                 time.sleep(duration_factor)
-                virtual_mouse.mouse_down(click_x, click_y, 'left')  # Hold to move left
+                # Brief hold then release (not persistent)
+                virtual_mouse.mouse_down(click_x, click_y, 'left')
                 time.sleep(0.01)
                 virtual_mouse.mouse_up(click_x, click_y, 'left')
+                _BUTTON_HELD = False
                 print(f"✅ Windows API stable left tracking (duration: {duration_factor:.3f}s)")
             except Exception as e:
                 print(f"❌ Stable left failed with Windows API: {e}")
@@ -1140,13 +1179,16 @@ def execute_minigame_action(decision):
                 
         elif action_type == 2:  # Stable right tracking
             try:
-                virtual_mouse.mouse_down(click_x, click_y, 'left')  # Hold to move right
+                # Hold to move right (brief, not persistent)
+                virtual_mouse.mouse_down(click_x, click_y, 'left')
+                _BUTTON_HELD = True
                 time.sleep(duration_factor)
                 virtual_mouse.mouse_up(click_x, click_y, 'left')
+                _BUTTON_HELD = False
+                
                 # Counter-strafe left
                 if counter_strafe > 0:
-                    virtual_mouse.mouse_up(click_x, click_y, 'left')
-                    time.sleep(counter_strafe)
+                    time.sleep(counter_strafe)  # Stay released
                 print(f"✅ Windows API stable right tracking (duration: {duration_factor:.3f}s)")
             except Exception as e:
                 print(f"❌ Stable right failed with Windows API: {e}")
@@ -1154,32 +1196,53 @@ def execute_minigame_action(decision):
                     
         elif action_type == 3:  # Ankle break left (release and wait)
             try:
-                virtual_mouse.mouse_up(click_x, click_y, 'left')    # Release completely
-                time.sleep(duration_factor)
-                print(f"✅ Windows API ankle break left (duration: {duration_factor:.3f}s)")
+                # CRITICAL: Like AutoHotkey, ensure button is released and stay released
+                if _BUTTON_HELD:
+                    virtual_mouse.mouse_up(click_x, click_y, 'left')    # Release if held
+                    _BUTTON_HELD = False
+                    print(f"🔺 Windows API ankle break left - RELEASED BUTTON")
+                else:
+                    print(f"🔺 Windows API ankle break left - BUTTON ALREADY RELEASED")
+                
+                # Small delay like AutoHotkey's ScanDelay, but keep button released
+                time.sleep(0.05)  # Short scan delay while released
+                print(f"✅ Windows API ankle break left (persistent release)")
             except Exception as e:
                 print(f"❌ Ankle break left failed with Windows API: {e}")
                 return
                 
-        elif action_type == 4:  # Ankle break right (hold and wait)
+        elif action_type == 4:  # Ankle break right (persistent hold)
             try:
-                virtual_mouse.mouse_down(click_x, click_y, 'left')  # Hold down
-                time.sleep(duration_factor)
-                virtual_mouse.mouse_up(click_x, click_y, 'left')
-                print(f"✅ Windows API ankle break right (duration: {duration_factor:.3f}s)")
+                # CRITICAL: Like AutoHotkey, hold down button and KEEP IT HELD
+                # Don't release until different action is needed
+                if not _BUTTON_HELD:
+                    virtual_mouse.mouse_down(click_x, click_y, 'left')  # Start holding
+                    _BUTTON_HELD = True
+                    print(f"🔻 Windows API ankle break right - HOLDING DOWN")
+                else:
+                    print(f"🔻 Windows API ankle break right - CONTINUING HOLD")
+                
+                # Small delay like AutoHotkey's ScanDelay, but keep button held
+                time.sleep(0.05)  # Short scan delay while holding
+                print(f"✅ Windows API ankle break right (persistent hold)")
             except Exception as e:
                 print(f"❌ Ankle break right failed with Windows API: {e}")
                 return
                 
         elif action_type == 5:  # Unstable left aggressive
             try:
-                virtual_mouse.mouse_up(click_x, click_y, 'left')    # Release for left
+                # Ensure button is released for left movement
+                if _BUTTON_HELD:
+                    virtual_mouse.mouse_up(click_x, click_y, 'left')    # Release if held
+                    _BUTTON_HELD = False
+                
                 time.sleep(duration_factor)
                 # Counter-strafe right
                 if counter_strafe > 0:
                     virtual_mouse.mouse_down(click_x, click_y, 'left')
                     time.sleep(counter_strafe)
                     virtual_mouse.mouse_up(click_x, click_y, 'left')
+                    _BUTTON_HELD = False  # Ensure state is correct after counter-strafe
                 print(f"✅ Windows API unstable left aggressive (duration: {duration_factor:.3f}s)")
             except Exception as e:
                 print(f"❌ Unstable left aggressive failed with Windows API: {e}")
@@ -1187,16 +1250,22 @@ def execute_minigame_action(decision):
                     
         elif action_type == 6:  # Unstable right aggressive
             try:
+                # Hold for right movement
                 virtual_mouse.mouse_down(click_x, click_y, 'left')  # Hold for right
+                _BUTTON_HELD = True
                 time.sleep(duration_factor)
+                
+                # For unstable actions, release after duration (not persistent like ankle break)
                 virtual_mouse.mouse_up(click_x, click_y, 'left')
+                _BUTTON_HELD = False
+                
                 # Counter-strafe left
                 if counter_strafe > 0:
-                    virtual_mouse.mouse_up(click_x, click_y, 'left')
-                    time.sleep(counter_strafe)
+                    time.sleep(counter_strafe)  # Stay released for counter-strafe
                 print(f"✅ Windows API unstable right aggressive (duration: {duration_factor:.3f}s)")
             except Exception as e:
                 print(f"❌ Unstable right aggressive failed with Windows API: {e}")
+                return
                 return
                     
     except Exception as e:
