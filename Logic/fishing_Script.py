@@ -96,6 +96,15 @@ except ImportError as e:
     IsRobloxOpen = None
     debug_log(LogCategory.SYSTEM, f"Warning: IsRoblox_Open not available: {e}")
 
+# Import enhanced fish detector (reduces false positives at event islands)
+try:
+    from BackGround_Logic.Enhanced_Fish_Detector import EnhancedFishDetector
+    ENHANCED_FISH_DETECTOR_AVAILABLE = True
+except ImportError as e:
+    ENHANCED_FISH_DETECTOR_AVAILABLE = False
+    EnhancedFishDetector = None
+    debug_log(LogCategory.SYSTEM, f"Warning: Enhanced Fish Detector not available: {e}")
+
 pyautogui.FAILSAFE = True
 
 
@@ -564,6 +573,23 @@ def _fish_on_hook_fallback():
         print(f"Error in fallback Fish_On_Hook detection: {e}")
         return False
 
+def _detect_fish_enhanced(region):
+    """
+    Enhanced fish detection that reduces false positives from event island red water.
+    Uses shape analysis, context awareness, and improved template matching.
+    
+    Returns: (found: bool, confidence: float, method: str)
+    """
+    if enhanced_fish_detector is not None:
+        try:
+            return enhanced_fish_detector.detect_fish_on_hook(region)
+        except Exception as e:
+            debug_log(LogCategory.ERROR, f"Enhanced detector error: {e}")
+    
+    # Fallback to original detection if enhanced detector fails
+    found, confidence = _detect_fish_on_hook_template(region)
+    return found, confidence, "template_fallback"
+
 def Fish_On_Hook(x, y, duration=0.011):
     """Detect the fish-on-hook indicator using improved template matching.
     
@@ -591,10 +617,17 @@ def Fish_On_Hook(x, y, duration=0.011):
     # Create region tuple (left, top, width, height) for screenshot
     region = (fish_region_left, fish_region_top, fish_region_width, fish_region_height)
     
-    # New detection method: Use improved Fish_On_Hook.png template
-    found, confidence = _detect_fish_on_hook_template(region)
-    print(f"🔍 Fish detection (template) attempt: found={found}, confidence={confidence:.3f}")
+    # Enhanced detection method: Reduces false positives from event island red water
+    found, confidence, method = _detect_fish_enhanced(region)
+    print(f"🔍 Enhanced fish detection: found={found}, confidence={confidence:.3f}, method={method}")
     
+    # Log detailed detection info for debugging event island issues
+    if found:
+        debug_log(LogCategory.FISH_DETECTION, f"🐟 FISH DETECTED! Method: {method}, Confidence: {confidence:.3f}")
+        if method == "context_color":
+            print("⚠️ WARNING: Color-based detection used - may be affected by event island red water")
+        elif method in ["template", "shape"]:
+            print("✅ RELIABLE: Shape/template detection used - event island resistant")
 
     if found:
         # Get click position - ONLY use Roblox window center
@@ -733,6 +766,16 @@ except Exception:
     POWER_ACTIVE_TPL = None
     SHIFT_LOCK_TPL = None
     FISH_ON_HOOK_TPL = None
+
+# Initialize enhanced fish detector for reduced false positives
+enhanced_fish_detector = None
+if ENHANCED_FISH_DETECTOR_AVAILABLE:
+    try:
+        enhanced_fish_detector = EnhancedFishDetector(IMAGES_DIR)
+        print("✅ Enhanced Fish Detector initialized - reduces false positives at event islands")
+    except Exception as e:
+        enhanced_fish_detector = None
+        print(f"⚠️ Enhanced Fish Detector initialization failed: {e}")
 
 
 def _match_template_in_region(template, region, threshold=0.80):
