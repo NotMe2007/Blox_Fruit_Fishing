@@ -4,6 +4,7 @@ import subprocess
 import threading
 import tkinter as tk
 import tkinter.messagebox as messagebox
+import tkinter.ttk as ttk
 import json
 from typing import Dict, Optional
 
@@ -43,6 +44,7 @@ from Logic.BackGround_Logic.Is_Roblox_Open import check_roblox_and_game
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SCRIPT_PATH = os.path.join(BASE_DIR, "Logic", "Fishing_Script.py")
 SETTINGS_FILE = os.path.join(BASE_DIR, "Logic", "BackGroud_Logic", "hotkey_settings.json")
+MINIGAME_SETTINGS_FILE = os.path.join(BASE_DIR, "Logic", "BackGroud_Logic", "minigame_settings.json")
 
 # Valid numpad keys for hotkeys
 VALID_NUMPAD_KEYS = ['num 0', 'num 1', 'num 2', 'num 3', 'num 4', 'num 5', 'num 6', 'num 7', 'num 8', 'num 9']
@@ -76,6 +78,46 @@ def save_hotkey_settings(settings: Dict[str, str]) -> None:
             json.dump(settings, f, indent=2)
     except Exception as e:
         debug_log(LogCategory.ERROR, f"Error saving hotkey settings: {e}")
+
+
+def load_minigame_settings() -> Dict[str, float]:
+    """Load minigame settings from file."""
+    try:
+        if os.path.exists(MINIGAME_SETTINGS_FILE):
+            with open(MINIGAME_SETTINGS_FILE, 'r') as f:
+                return json.load(f)
+    except Exception as e:
+        debug_log(LogCategory.ERROR, f"Error loading minigame settings: {e}")
+    
+    # Default minigame settings (matching AHK values)
+    return {
+        'control_value': 0.0,
+        'fish_bar_tolerance': 5,
+        'white_bar_tolerance': 15,
+        'arrow_tolerance': 6,
+        'scan_delay': 10,
+        'side_bar_ratio': 0.7,
+        'side_bar_delay': 400,
+        'stable_right_multiplier': 2.36,
+        'stable_right_division': 1.55,
+        'stable_left_multiplier': 1.211,
+        'stable_left_division': 1.12,
+        'unstable_right_multiplier': 2.665,
+        'unstable_right_division': 1.5,
+        'unstable_left_multiplier': 2.19,
+        'unstable_left_division': 1.0,
+        'right_ankle_break_multiplier': 0.75,
+        'left_ankle_break_multiplier': 0.45
+    }
+
+
+def save_minigame_settings(settings: Dict[str, float]) -> None:
+    """Save minigame settings to file."""
+    try:
+        with open(MINIGAME_SETTINGS_FILE, 'w') as f:
+            json.dump(settings, f, indent=2)
+    except Exception as e:
+        debug_log(LogCategory.ERROR, f"Error saving minigame settings: {e}")
 
 
 def is_valid_hotkey(hotkey: str) -> bool:
@@ -118,7 +160,7 @@ class LauncherApp(_BaseLauncher):
             super().__init__()
 
         self.title("Blox Fruit Fishing — Launcher")
-        width, height = 650, 480  # Increased height for hotkey settings
+        width, height = 800, 600  # Increased size for tabbed interface
         # center window on screen
         self.geometry(f"{width}x{height}")
         self.update_idletasks()
@@ -136,10 +178,12 @@ class LauncherApp(_BaseLauncher):
 
         self.process = None
         
-        # Load hotkey settings
+        # Load settings
         self.hotkey_settings = load_hotkey_settings()
+        self.minigame_settings = load_minigame_settings()
         self.hotkeys_registered = False
         self.hotkey_entries = {}  # Store hotkey entry widgets
+        self.minigame_entries = {}  # Store minigame entry widgets
         
         # Initialize hotkeys if keyboard library is available
         if KEYBOARD_AVAILABLE:
@@ -151,18 +195,40 @@ class LauncherApp(_BaseLauncher):
             self._build_basic_ui()
 
     def _build_modern_ui(self):
-        # container frame
-        container = ctk.CTkFrame(self, corner_radius=18)
-        container.place(relx=0.5, rely=0.5, anchor="center", relwidth=0.92, relheight=0.92)
+        # Create main container
+        main_container = ctk.CTkFrame(self, corner_radius=18)
+        main_container.place(relx=0.5, rely=0.5, anchor="center", relwidth=0.95, relheight=0.95)
 
-        title = ctk.CTkLabel(container, text="Auto Fishing", font=ctk.CTkFont(size=28, weight="bold"))
-        title.pack(pady=(18, 6))
+        # Create tabview
+        tabview = ctk.CTkTabview(main_container, width=750, height=550)
+        tabview.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # Add tabs
+        tabview.add("General")
+        tabview.add("Hotkeys")
+        tabview.add("Minigame Settings")
+        
+        # Build General tab
+        self._build_general_tab(tabview.tab("General"))
+        
+        # Build Hotkeys tab
+        self._build_hotkeys_tab(tabview.tab("Hotkeys"))
+        
+        # Build Minigame Settings tab
+        self._build_minigame_tab(tabview.tab("Minigame Settings"))
 
-        subtitle = ctk.CTkLabel(container, text="Launch the automated fishing script", font=ctk.CTkFont(size=12))
-        subtitle.pack(pady=(0, 18))
+    def _build_general_tab(self, tab_frame):
+        """Build the general/launcher tab."""
+        # Title
+        title = ctk.CTkLabel(tab_frame, text="Auto Fishing", font=ctk.CTkFont(size=28, weight="bold"))
+        title.pack(pady=(20, 10))
 
+        subtitle = ctk.CTkLabel(tab_frame, text="Launch the automated fishing script", font=ctk.CTkFont(size=12))
+        subtitle.pack(pady=(0, 20))
+
+        # Main button
         self.btn = ctk.CTkButton(
-            container,
+            tab_frame,
             text="Auto Fishing",
             width=260,
             height=70,
@@ -172,12 +238,11 @@ class LauncherApp(_BaseLauncher):
             font=ctk.CTkFont(size=16, weight="bold"),
             command=self.on_start,
         )
-        self.btn.pack(pady=(0, 12))
+        self.btn.pack(pady=(0, 15))
 
-
-        # Add topmost toggle button
+        # Topmost toggle button
         self.topmost_btn = ctk.CTkButton(
-            container,
+            tab_frame,
             text="📌 Always on Top: ON",
             width=200,
             height=25,
@@ -187,34 +252,442 @@ class LauncherApp(_BaseLauncher):
             font=ctk.CTkFont(size=11),
             command=self.toggle_topmost,
         )
-        self.topmost_btn.pack(pady=(6, 6))
+        self.topmost_btn.pack(pady=(0, 10))
 
-        # Add hotkey configuration section
-        self._add_hotkey_section(container)
+        # Tip
+        hint = ctk.CTkLabel(tab_frame, text="Tip: Keep the game window open. Use hotkeys for quick start/stop.")
+        hint.pack(pady=(20, 10))
+
+    def _build_hotkeys_tab(self, tab_frame):
+        """Build the dedicated hotkeys tab with scrollable content."""
+        # Create scrollable frame for all content
+        scrollable_frame = ctk.CTkScrollableFrame(tab_frame, width=700, height=500)
+        scrollable_frame.pack(fill="both", expand=True, padx=10, pady=10)
         
-        hint = ctk.CTkLabel(container, text="Tip: Keep the game window open. Use hotkeys for quick start/stop.")
-        hint.pack(side="bottom", pady=(6, 12))
+        # Title
+        title = ctk.CTkLabel(scrollable_frame, text="Hotkey Configuration", font=ctk.CTkFont(size=24, weight="bold"))
+        title.pack(pady=(20, 10))
+        
+        # Instructions (moved up to replace subtitle)
+        instructions_frame = ctk.CTkFrame(scrollable_frame)
+        instructions_frame.pack(fill="x", padx=20, pady=(0, 20))
+        
+        instructions_title = ctk.CTkLabel(instructions_frame, text="Instructions", font=ctk.CTkFont(size=14, weight="bold"))
+        instructions_title.pack(pady=(10, 5))
+        
+        instructions_text = ctk.CTkLabel(
+            instructions_frame, 
+            text="• Only numpad keys (num 0-9) are allowed\n• Hotkeys work globally - even when Roblox is focused\n• Make sure both hotkeys are different\n• Hotkeys are automatically saved",
+            font=ctk.CTkFont(size=11),
+            justify="left"
+        )
+        instructions_text.pack(padx=20, pady=(0, 10))
+        
+        # Add hotkey configuration section
+        self._add_hotkey_section(scrollable_frame)
+        
+        # Anti-Detection Settings
+        anti_detection_frame = ctk.CTkFrame(scrollable_frame)
+        anti_detection_frame.pack(fill="x", padx=20, pady=(10, 10))
+        
+        anti_detection_title = ctk.CTkLabel(anti_detection_frame, text="🛡️ Anti-Detection Settings", font=ctk.CTkFont(size=14, weight="bold"))
+        anti_detection_title.pack(pady=(10, 5))
+        
+        # Disable auto-focus option
+        self.disable_auto_focus = tk.BooleanVar(value=False)
+        auto_focus_checkbox = ctk.CTkCheckBox(
+            anti_detection_frame,
+            text="Disable automatic window focusing (prevents Roblox anti-cheat detection)",
+            variable=self.disable_auto_focus,
+            font=ctk.CTkFont(size=11)
+        )
+        auto_focus_checkbox.pack(padx=20, pady=5)
+        
+        # Passive mode option (even safer)
+        self.passive_mode = tk.BooleanVar(value=False)
+        passive_mode_checkbox = ctk.CTkCheckBox(
+            anti_detection_frame,
+            text="Enable Passive Mode (100% undetectable - no input simulation)",
+            variable=self.passive_mode,
+            font=ctk.CTkFont(size=11),
+            text_color="green"
+        )
+        passive_mode_checkbox.pack(padx=20, pady=5)
+        
+        anti_detection_note = ctk.CTkLabel(
+            anti_detection_frame,
+            text="⚠️ Passive Mode: Script only monitors, never sends input to Roblox\n💡 VirtualMouse: Uses hardware-level input (more undetectable than PyAutoGUI)",
+            font=ctk.CTkFont(size=10),
+            text_color="orange"
+        )
+        anti_detection_note.pack(padx=20, pady=(0, 10))
+
+    def _build_minigame_tab(self, tab_frame):
+        """Build the minigame settings tab."""
+        # Create scrollable frame for settings
+        scrollable_frame = ctk.CTkScrollableFrame(tab_frame, width=700, height=500)
+        scrollable_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # Title
+        title = ctk.CTkLabel(scrollable_frame, text="!!!!! Check the Control stat of your Rod !!!!!", 
+                           font=ctk.CTkFont(size=16, weight="bold"), text_color="#FF6B6B")
+        title.pack(pady=(10, 20))
+        
+        # Left column settings
+        left_frame = ctk.CTkFrame(scrollable_frame)
+        left_frame.pack(side="left", fill="both", expand=True, padx=(10, 5), pady=5)
+        
+        # Control Value
+        self._add_minigame_entry(left_frame, "Control Value:", "control_value", 0, 10)
+        
+        # Tolerances
+        self._add_minigame_entry(left_frame, "Fish Bar Tolerance:", "fish_bar_tolerance", 5, 10)
+        self._add_minigame_entry(left_frame, "White Bar Tolerance:", "white_bar_tolerance", 15, 10)
+        self._add_minigame_entry(left_frame, "Arrow Tolerance:", "arrow_tolerance", 6, 10)
+        
+        # Timing
+        self._add_minigame_entry(left_frame, "Scan Delay:", "scan_delay", 10, 10)
+        self._add_minigame_entry(left_frame, "Side Bar Ratio:", "side_bar_ratio", 0.7, 10)
+        self._add_minigame_entry(left_frame, "Side Bar Delay:", "side_bar_delay", 400, 10)
+        
+        # Right column settings
+        right_frame = ctk.CTkFrame(scrollable_frame)
+        right_frame.pack(side="right", fill="both", expand=True, padx=(5, 10), pady=5)
+        
+        # Stable settings
+        stable_label = ctk.CTkLabel(right_frame, text="Stable Settings", font=ctk.CTkFont(size=14, weight="bold"))
+        stable_label.pack(pady=(10, 10))
+        
+        self._add_minigame_entry(right_frame, "Stable Right Multiplier:", "stable_right_multiplier", 2.36, 5)
+        self._add_minigame_entry(right_frame, "Stable Right Division:", "stable_right_division", 1.55, 5)
+        self._add_minigame_entry(right_frame, "Stable Left Multiplier:", "stable_left_multiplier", 1.211, 5)
+        self._add_minigame_entry(right_frame, "Stable Left Division:", "stable_left_division", 1.12, 5)
+        
+        # Unstable settings
+        unstable_label = ctk.CTkLabel(right_frame, text="Unstable Settings", font=ctk.CTkFont(size=14, weight="bold"))
+        unstable_label.pack(pady=(20, 10))
+        
+        self._add_minigame_entry(right_frame, "Unstable Right Multiplier:", "unstable_right_multiplier", 2.665, 5)
+        self._add_minigame_entry(right_frame, "Unstable Right Division:", "unstable_right_division", 1.5, 5)
+        self._add_minigame_entry(right_frame, "Unstable Left Multiplier:", "unstable_left_multiplier", 2.19, 5)
+        self._add_minigame_entry(right_frame, "Unstable Left Division:", "unstable_left_division", 1.0, 5)
+        
+        # Ankle Break settings
+        ankle_label = ctk.CTkLabel(right_frame, text="Ankle Break Settings", font=ctk.CTkFont(size=14, weight="bold"))
+        ankle_label.pack(pady=(20, 10))
+        
+        self._add_minigame_entry(right_frame, "Right Ankle Break Multiplier:", "right_ankle_break_multiplier", 0.75, 5)
+        self._add_minigame_entry(right_frame, "Left Ankle Break Multiplier:", "left_ankle_break_multiplier", 0.45, 5)
+        
+        # Buttons frame
+        buttons_frame = ctk.CTkFrame(scrollable_frame, fg_color="transparent")
+        buttons_frame.pack(fill="x", pady=20)
+        
+        # Save and Load buttons
+        save_btn = ctk.CTkButton(buttons_frame, text="Save Settings", width=120, command=self._save_minigame_settings)
+        save_btn.pack(side="left", padx=(50, 10))
+        
+        load_btn = ctk.CTkButton(buttons_frame, text="Load Settings", width=120, command=self._load_minigame_settings)
+        load_btn.pack(side="left", padx=10)
+        
+        reset_btn = ctk.CTkButton(buttons_frame, text="Reset to Defaults", width=120, command=self._reset_minigame_settings)
+        reset_btn.pack(side="left", padx=10)
+
+    def _add_minigame_entry(self, parent, label_text, key, default_value, pady=5):
+        """Add a labeled entry for minigame settings."""
+        entry_frame = ctk.CTkFrame(parent, fg_color="transparent")
+        entry_frame.pack(fill="x", padx=10, pady=pady)
+        
+        label = ctk.CTkLabel(entry_frame, text=label_text, width=200, anchor="w")
+        label.pack(side="left", padx=(0, 10))
+        
+        entry = ctk.CTkEntry(entry_frame, width=100, placeholder_text=str(default_value))
+        entry.pack(side="right", padx=(10, 0))
+        entry.insert(0, str(self.minigame_settings.get(key, default_value)))
+        
+        self.minigame_entries[key] = entry
 
     def _build_basic_ui(self):
-        # fallback if customtkinter is not installed
-        frame = tk.Frame(self, bd=2, relief="groove")
-        frame.place(relx=0.5, rely=0.5, anchor="center", relwidth=0.92, relheight=0.92)
-
-        title = tk.Label(frame, text="Auto Fishing", font=("Segoe UI", 20, "bold"))
-        title.pack(pady=(14, 6))
-
-        subtitle = tk.Label(frame, text="Launch the automated fishing script")
-        subtitle.pack(pady=(0, 12))
-
-        self.btn = tk.Button(frame, text="Auto Fishing", width=30, height=2, command=self.on_start)
-        self.btn.pack(pady=(0, 8))
+        # Create notebook for tabs (basic tkinter version)
+        notebook = ttk.Notebook(self)
+        notebook.pack(fill="both", expand=True, padx=10, pady=10)
         
-        # Add topmost toggle button for basic UI
-        self.topmost_btn = tk.Button(frame, text="📌 Always on Top: ON", width=25, height=1, command=self.toggle_topmost)
-        self.topmost_btn.pack(pady=(4, 4))
+        # General tab
+        general_frame = ttk.Frame(notebook)
+        notebook.add(general_frame, text="General")
         
-        # Add hotkey configuration section for basic UI
-        self._add_hotkey_section_basic(frame)
+        # Hotkeys tab
+        hotkeys_frame = ttk.Frame(notebook)
+        notebook.add(hotkeys_frame, text="Hotkeys")
+        
+        # Minigame Settings tab
+        minigame_frame = ttk.Frame(notebook)
+        notebook.add(minigame_frame, text="Minigame Settings")
+        
+        # Build tabs
+        self._build_general_tab_basic(general_frame)
+        self._build_hotkeys_tab_basic(hotkeys_frame)
+        self._build_minigame_tab_basic(minigame_frame)
+
+    def _build_general_tab_basic(self, tab_frame):
+        """Build the general tab for basic UI."""
+        # Title
+        title = tk.Label(tab_frame, text="Auto Fishing", font=("Segoe UI", 20, "bold"))
+        title.pack(pady=(20, 10))
+
+        subtitle = tk.Label(tab_frame, text="Launch the automated fishing script")
+        subtitle.pack(pady=(0, 15))
+
+        # Main button
+        self.btn = tk.Button(tab_frame, text="Auto Fishing", width=30, height=2, command=self.on_start)
+        self.btn.pack(pady=(0, 10))
+        
+        # Topmost toggle button
+        self.topmost_btn = tk.Button(tab_frame, text="📌 Always on Top: ON", width=25, height=1, command=self.toggle_topmost)
+        self.topmost_btn.pack(pady=(5, 10))
+
+    def _build_hotkeys_tab_basic(self, tab_frame):
+        """Build the hotkeys tab for basic UI with scrollable content."""
+        # Create canvas and scrollbar for scrolling
+        canvas = tk.Canvas(tab_frame)
+        scrollbar = ttk.Scrollbar(tab_frame, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        # Enable mouse wheel scrolling
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        
+        # Title
+        title = tk.Label(scrollable_frame, text="Hotkey Configuration", font=("Segoe UI", 18, "bold"))
+        title.pack(pady=(20, 10))
+
+        # Instructions (moved up to replace subtitle)
+        instructions_frame = tk.LabelFrame(scrollable_frame, text="Instructions", padx=20, pady=10)
+        instructions_frame.pack(fill="x", padx=20, pady=(0, 20))
+        
+        instructions_text = tk.Label(
+            instructions_frame, 
+            text="• Only numpad keys (num 0-9) are allowed\n• Hotkeys work globally - even when Roblox is focused\n• Make sure both hotkeys are different\n• Hotkeys are automatically saved",
+            justify="left"
+        )
+        instructions_text.pack()
+        
+        # Add hotkey configuration section
+        self._add_hotkey_section_basic(scrollable_frame)
+        
+        # Anti-Detection Settings
+        anti_detection_frame = tk.LabelFrame(scrollable_frame, text="🛡️ Anti-Detection Settings", padx=20, pady=10)
+        anti_detection_frame.pack(fill="x", padx=20, pady=(10, 10))
+        
+        # Disable auto-focus option
+        if not hasattr(self, 'disable_auto_focus'):
+            self.disable_auto_focus = tk.BooleanVar(value=False)
+        auto_focus_checkbox = tk.Checkbutton(
+            anti_detection_frame,
+            text="Disable automatic window focusing (prevents anti-cheat detection)",
+            variable=self.disable_auto_focus
+        )
+        auto_focus_checkbox.pack(anchor="w", pady=5)
+        
+        # Passive mode option (even safer)
+        if not hasattr(self, 'passive_mode'):
+            self.passive_mode = tk.BooleanVar(value=False)
+        passive_mode_checkbox = tk.Checkbutton(
+            anti_detection_frame,
+            text="Enable Passive Mode (100% undetectable - no input simulation)",
+            variable=self.passive_mode,
+            fg="green"
+        )
+        passive_mode_checkbox.pack(anchor="w", pady=5)
+        
+        anti_detection_note = tk.Label(
+            anti_detection_frame,
+            text="⚠️ Passive Mode: Script only monitors, never sends input to Roblox\n💡 VirtualMouse: Uses hardware-level input (undetectable)",
+            fg="orange",
+            justify="left"
+        )
+        anti_detection_note.pack(pady=(5, 0))
+
+    def _build_minigame_tab_basic(self, tab_frame):
+        """Build the minigame settings tab for basic UI."""
+        # Create canvas and scrollbar for scrolling
+        canvas = tk.Canvas(tab_frame)
+        scrollbar = ttk.Scrollbar(tab_frame, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        # Title
+        title = tk.Label(scrollable_frame, text="!!!!! Check the Control stat of your Rod !!!!!", 
+                        font=("Segoe UI", 12, "bold"), fg="red")
+        title.pack(pady=(10, 20))
+        
+        # Create two columns
+        columns_frame = ttk.Frame(scrollable_frame)
+        columns_frame.pack(fill="both", expand=True, padx=10)
+        
+        # Left column
+        left_frame = ttk.LabelFrame(columns_frame, text="Basic Settings", padding=10)
+        left_frame.pack(side="left", fill="both", expand=True, padx=(0, 5))
+        
+        # Add basic settings
+        self._add_minigame_entry_basic(left_frame, "Control Value:", "control_value", 0)
+        self._add_minigame_entry_basic(left_frame, "Fish Bar Tolerance:", "fish_bar_tolerance", 5)
+        self._add_minigame_entry_basic(left_frame, "White Bar Tolerance:", "white_bar_tolerance", 15)
+        self._add_minigame_entry_basic(left_frame, "Arrow Tolerance:", "arrow_tolerance", 6)
+        self._add_minigame_entry_basic(left_frame, "Scan Delay:", "scan_delay", 10)
+        self._add_minigame_entry_basic(left_frame, "Side Bar Ratio:", "side_bar_ratio", 0.7)
+        self._add_minigame_entry_basic(left_frame, "Side Bar Delay:", "side_bar_delay", 400)
+        
+        # Right column
+        right_frame = ttk.LabelFrame(columns_frame, text="Advanced Settings", padding=10)
+        right_frame.pack(side="right", fill="both", expand=True, padx=(5, 0))
+        
+        # Stable settings
+        stable_frame = ttk.LabelFrame(right_frame, text="Stable Settings", padding=5)
+        stable_frame.pack(fill="x", pady=(0, 10))
+        
+        self._add_minigame_entry_basic(stable_frame, "Right Multiplier:", "stable_right_multiplier", 2.36)
+        self._add_minigame_entry_basic(stable_frame, "Right Division:", "stable_right_division", 1.55)
+        self._add_minigame_entry_basic(stable_frame, "Left Multiplier:", "stable_left_multiplier", 1.211)
+        self._add_minigame_entry_basic(stable_frame, "Left Division:", "stable_left_division", 1.12)
+        
+        # Unstable settings
+        unstable_frame = ttk.LabelFrame(right_frame, text="Unstable Settings", padding=5)
+        unstable_frame.pack(fill="x", pady=(0, 10))
+        
+        self._add_minigame_entry_basic(unstable_frame, "Right Multiplier:", "unstable_right_multiplier", 2.665)
+        self._add_minigame_entry_basic(unstable_frame, "Right Division:", "unstable_right_division", 1.5)
+        self._add_minigame_entry_basic(unstable_frame, "Left Multiplier:", "unstable_left_multiplier", 2.19)
+        self._add_minigame_entry_basic(unstable_frame, "Left Division:", "unstable_left_division", 1.0)
+        
+        # Ankle break settings
+        ankle_frame = ttk.LabelFrame(right_frame, text="Ankle Break Settings", padding=5)
+        ankle_frame.pack(fill="x")
+        
+        self._add_minigame_entry_basic(ankle_frame, "Right Multiplier:", "right_ankle_break_multiplier", 0.75)
+        self._add_minigame_entry_basic(ankle_frame, "Left Multiplier:", "left_ankle_break_multiplier", 0.45)
+        
+        # Buttons
+        buttons_frame = ttk.Frame(scrollable_frame)
+        buttons_frame.pack(fill="x", pady=20)
+        
+        save_btn = tk.Button(buttons_frame, text="Save Settings", command=self._save_minigame_settings)
+        save_btn.pack(side="left", padx=(50, 10))
+        
+        load_btn = tk.Button(buttons_frame, text="Load Settings", command=self._load_minigame_settings)
+        load_btn.pack(side="left", padx=10)
+        
+        reset_btn = tk.Button(buttons_frame, text="Reset to Defaults", command=self._reset_minigame_settings)
+        reset_btn.pack(side="left", padx=10)
+
+    def _add_minigame_entry_basic(self, parent, label_text, key, default_value):
+        """Add a labeled entry for minigame settings (basic UI)."""
+        entry_frame = ttk.Frame(parent)
+        entry_frame.pack(fill="x", pady=2)
+        
+        label = tk.Label(entry_frame, text=label_text, width=18, anchor="w")
+        label.pack(side="left")
+        
+        entry = tk.Entry(entry_frame, width=10)
+        entry.pack(side="right", padx=(10, 0))
+        entry.insert(0, str(self.minigame_settings.get(key, default_value)))
+        
+        self.minigame_entries[key] = entry
+
+    def _save_minigame_settings(self):
+        """Save minigame settings from GUI to file."""
+        try:
+            # Collect settings from entries
+            new_settings = {}
+            for key, entry in self.minigame_entries.items():
+                try:
+                    value = entry.get().strip()
+                    # Convert to float
+                    new_settings[key] = float(value)
+                except ValueError:
+                    messagebox.showerror("Invalid Value", f"Invalid value for {key}: '{value}'. Please enter a valid number.")
+                    return
+            
+            # Save to file
+            save_minigame_settings(new_settings)
+            self.minigame_settings = new_settings
+            
+            messagebox.showinfo("Success", "Minigame settings saved successfully!")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Error saving minigame settings: {str(e)}")
+
+    def _load_minigame_settings(self):
+        """Load minigame settings from file to GUI."""
+        try:
+            # Reload from file
+            self.minigame_settings = load_minigame_settings()
+            
+            # Update GUI entries
+            for key, entry in self.minigame_entries.items():
+                entry.delete(0, tk.END)
+                entry.insert(0, str(self.minigame_settings.get(key, 0)))
+            
+            messagebox.showinfo("Success", "Minigame settings loaded successfully!")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Error loading minigame settings: {str(e)}")
+
+    def _reset_minigame_settings(self):
+        """Reset minigame settings to defaults."""
+        try:
+            # Get default settings
+            default_settings = load_minigame_settings.__defaults__[0] if hasattr(load_minigame_settings, '__defaults__') else {
+                'control_value': 0.0,
+                'fish_bar_tolerance': 5,
+                'white_bar_tolerance': 15,
+                'arrow_tolerance': 6,
+                'scan_delay': 10,
+                'side_bar_ratio': 0.7,
+                'side_bar_delay': 400,
+                'stable_right_multiplier': 2.36,
+                'stable_right_division': 1.55,
+                'stable_left_multiplier': 1.211,
+                'stable_left_division': 1.12,
+                'unstable_right_multiplier': 2.665,
+                'unstable_right_division': 1.5,
+                'unstable_left_multiplier': 2.19,
+                'unstable_left_division': 1.0,
+                'right_ankle_break_multiplier': 0.75,
+                'left_ankle_break_multiplier': 0.45
+            }
+            
+            # Update GUI entries
+            for key, entry in self.minigame_entries.items():
+                entry.delete(0, tk.END)
+                entry.insert(0, str(default_settings.get(key, 0)))
+            
+            messagebox.showinfo("Reset Complete", "Minigame settings reset to defaults. Don't forget to save!")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Error resetting minigame settings: {str(e)}")
 
     # status label intentionally removed per user request
 
