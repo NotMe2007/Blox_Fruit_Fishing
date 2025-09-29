@@ -48,6 +48,9 @@ class LogCategory(Enum):
     TIMING = "TIMING"        # Execution times, delays, performance
     STATS = "STATS"         # Statistics, counters, success rates
     
+    # Screen capture
+    SCREEN_CAPTURE = "SCREEN_CAPTURE"  # Screen capture operations, image processing
+    
     # Development and debugging
     DEBUG = "DEBUG"          # General debug information
     VERBOSE = "VERBOSE"      # Very detailed/spammy logs

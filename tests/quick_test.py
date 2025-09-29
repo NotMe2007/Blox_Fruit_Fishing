@@ -84,7 +84,7 @@ def quick_dependency_test():
         print_test_result("Windows API access", True)
         passed += 1
     except Exception as e:
-        print_test_result("Windows API access", False, "Optional - may work with pyautogui")
+        print_test_result("Windows API access", False, "Optional - fallbacks available")
         # Don't count as failure since it's optional
     total += 1
     

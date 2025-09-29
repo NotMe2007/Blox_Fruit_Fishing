@@ -160,7 +160,6 @@ CORE_DEPENDENCIES = [
     "cv2",           # OpenCV for template matching
     "numpy",         # Numerical operations
     "PIL",           # Image processing
-    "pyautogui",     # Basic automation
     "psutil",        # Process management
     "win32gui",      # Windows API (optional)
     "keyboard"       # Keyboard input (optional)

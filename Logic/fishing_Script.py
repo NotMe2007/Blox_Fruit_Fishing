@@ -3,7 +3,6 @@ import sys
 import os
 import cv2
 import numpy as np
-import pyautogui
 import random
 import math
 import win32gui
@@ -55,6 +54,17 @@ except ImportError as e:
     virtual_keyboard = None
     VIRTUAL_KEYBOARD_AVAILABLE = False
 
+# Import screen capture utility (replacement for pyautogui.screenshot)
+screen_capture = None
+SCREEN_CAPTURE_AVAILABLE = False
+
+try:
+    from BackGround_Logic.Screen_Capture import screenshot
+    SCREEN_CAPTURE_AVAILABLE = True
+except ImportError as e:
+    SCREEN_CAPTURE_AVAILABLE = False
+    screenshot = None
+
 # Import window manager for proper Roblox window handling
 try:
     from BackGround_Logic.Window_Manager import roblox_window_manager, get_roblox_coordinates, get_roblox_window_region, ensure_roblox_focused # type: ignore
@@ -105,46 +115,95 @@ except ImportError as e:
     EnhancedFishDetector = None
     debug_log(LogCategory.SYSTEM, f"Warning: Enhanced Fish Detector not available: {e}")
 
-pyautogui.FAILSAFE = True
-
 
 def smooth_move_to(target_x, target_y, duration=None):
     """
-    Move mouse to target position. Uses instant movement with virtual mouse (undetected),
-    fallback to smooth movement with PyAutoGUI when virtual mouse unavailable.
+    Move mouse to target position using Virtual Mouse (undetected).
+    Falls back to manual cursor positioning if Virtual Mouse unavailable.
     """
-    # If virtual mouse is available, use instant movement (no delays needed - undetected)
+    # If virtual mouse is available, use it (undetected)
     if VIRTUAL_MOUSE_AVAILABLE and virtual_mouse is not None:
         try:
             virtual_mouse.move_to(target_x, target_y)
             return
         except Exception as e:
+            debug_log(LogCategory.ERROR, f"Virtual mouse move failed: {e}")
+    
+    # Fallback: Use Windows API directly for cursor positioning
+    try:
+        import ctypes
+        ctypes.windll.user32.SetCursorPos(target_x, target_y)
+    except Exception as e:
+        debug_log(LogCategory.ERROR, f"Fallback cursor positioning failed: {e}")
+
+
+def fallback_mouse_action(x, y, action, duration=0.01):
+    """Fallback mouse action using Windows API when Virtual Mouse unavailable."""
+    try:
+        import ctypes
+        user32 = ctypes.windll.user32
+        user32.SetCursorPos(x, y)
+        
+        MOUSEEVENTF_LEFTDOWN = 0x0002
+        MOUSEEVENTF_LEFTUP = 0x0004
+        
+        if action == "down":
+            user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+        elif action == "up":
+            user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+        elif action == "click":
+            user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+            time.sleep(duration)
+            user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+    except Exception as e:
+        debug_log(LogCategory.ERROR, f"Fallback mouse action failed: {e}")
+
+
+def fallback_key_press(key_code):
+    """Fallback key press using Windows API when Virtual Keyboard unavailable."""
+    try:
+        import ctypes
+        user32 = ctypes.windll.user32
+        KEYEVENTF_KEYUP = 0x0002
+        
+        user32.keybd_event(key_code, 0, 0, 0)  # Key down
+        user32.keybd_event(key_code, 0, KEYEVENTF_KEYUP, 0)  # Key up
+    except Exception as e:
+        debug_log(LogCategory.ERROR, f"Fallback key press failed: {e}")
+
+
+def get_mouse_position():
+    """Get current mouse position using Virtual Mouse or Windows API fallback."""
+    if VIRTUAL_MOUSE_AVAILABLE and virtual_mouse is not None:
+        try:
+            return virtual_mouse.get_cursor_pos()
+        except Exception:
             pass
     
-    # Fallback: PyAutoGUI with minimal smooth movement for compatibility
-    start_x, start_y = pyautogui.position()
-    
-    # Calculate distance and minimal duration for system responsiveness
-    distance = math.sqrt((target_x - start_x) ** 2 + (target_y - start_y) ** 2)
-    if duration is None:
-        # Minimal duration for system to register movement
-        duration = min(0.01 + distance * 0.0001, 0.05)  # 0.01s to 0.05s max (very fast!)
-    
-    # Minimal steps for fastest movement
-    steps = max(2, int(duration * 30))  # Fewer steps, much faster
-    
-    for i in range(steps + 1):
-        progress = i / steps
-        
-        # Linear interpolation (no curves needed)
-        x = start_x + (target_x - start_x) * progress
-        y = start_y + (target_y - start_y) * progress
-        
-        pyautogui.moveTo(int(x), int(y))
-        
-        # Minimal step timing for system responsiveness only
-        step_delay = duration / steps
-        time.sleep(step_delay)
+    # Fallback to Windows API
+    try:
+        import ctypes
+        class POINT(ctypes.Structure):
+            _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+        point = POINT()
+        ctypes.windll.user32.GetCursorPos(ctypes.byref(point))
+        return point.x, point.y
+    except Exception as e:
+        debug_log(LogCategory.ERROR, f"Get mouse position failed: {e}")
+        return 0, 0
+
+
+def get_screen_size():
+    """Get screen dimensions using Windows API."""
+    try:
+        import ctypes
+        user32 = ctypes.windll.user32
+        screen_w = user32.GetSystemMetrics(0)  # SM_CXSCREEN
+        screen_h = user32.GetSystemMetrics(1)  # SM_CYSCREEN
+        return screen_w, screen_h
+    except Exception as e:
+        debug_log(LogCategory.ERROR, f"Get screen size failed: {e}")
+        return 1920, 1080  # Default fallback
 
 
 
@@ -175,28 +234,104 @@ def CastFishingRod(x, y, hold_seconds=0.93):
     
     # Use virtual mouse for casting if available
     if VIRTUAL_MOUSE_AVAILABLE and virtual_mouse is not None:
-        # Move to casting position with virtual mouse (instant - no delays needed)
-        virtual_mouse.move_to(target_x, target_y)
-        time.sleep(0.1)  # Brief delay after move
+        print("🛡️ [ULTRA-STEALTH] Using enhanced hardware-level casting")
         
-        # Use separate mouse_down/mouse_up for proper casting hold
-        # This is the bypass method that avoids detection
-        virtual_mouse.mouse_down(target_x, target_y, 'left')  # Press down
+        # Enhanced anti-detection: Larger random offset range
+        cast_offset_x = random.randint(-8, 8)
+        cast_offset_y = random.randint(-8, 8)
+        final_cast_x = target_x + cast_offset_x
+        final_cast_y = target_y + cast_offset_y
+        
+        # Phase 1: Pre-cast natural movement (critical for avoiding detection)
+        # Move to a random position near the target first
+        approach_distance = random.randint(25, 50)
+        approach_angle = random.uniform(0, 2 * 3.14159)
+        approach_x = final_cast_x + int(approach_distance * math.cos(approach_angle))
+        approach_y = final_cast_y + int(approach_distance * math.sin(approach_angle))
+        
+        # Get current mouse position for natural movement
+        current_pos = virtual_mouse.get_cursor_pos()
+        if current_pos:
+            print(f"🛡️ [ULTRA-STEALTH] Natural pre-cast movement from ({current_pos[0]}, {current_pos[1]})")
+            # Move naturally to approach position
+            virtual_mouse.human_like_move(current_pos[0], current_pos[1], approach_x, approach_y, 
+                                        random.uniform(0.3, 0.7))
+        else:
+            virtual_mouse.move_to(approach_x, approach_y)
+        
+        # Phase 2: Human hesitation and adjustment
+        hesitation_delay = random.uniform(0.2, 0.5)
+        print(f"🛡️ [ULTRA-STEALTH] Human-like hesitation ({hesitation_delay:.2f}s)")
+        time.sleep(hesitation_delay)
+        
+        # Small adjustment movement (like a human fine-tuning position)
+        adjust_x = approach_x + random.randint(-10, 10)
+        adjust_y = approach_y + random.randint(-10, 10)
+        virtual_mouse.move_to(adjust_x, adjust_y)
+        time.sleep(random.uniform(0.1, 0.25))
+        
+        # Phase 3: Final approach to cast position with natural curve
+        print(f"🎣 [ULTRA-STEALTH] Natural approach to cast position ({final_cast_x}, {final_cast_y})")
+        virtual_mouse.human_like_move(adjust_x, adjust_y, final_cast_x, final_cast_y, 
+                                    random.uniform(0.2, 0.4))
+        
+        # Phase 4: Pre-cast stabilization (human behavior)
+        stabilize_delay = random.uniform(0.1, 0.3)
+        print(f"🛡️ [ULTRA-STEALTH] Pre-cast stabilization ({stabilize_delay:.2f}s)")
+        time.sleep(stabilize_delay)
+        
+        print(f"🎣 [ULTRA-STEALTH] Enhanced hardware casting for {actual_hold:.2f}s")
+        
+        # Phase 5: Enhanced casting with variable timing
+        cast_start_delay = random.uniform(0.05, 0.15)  # Human reaction time
+        time.sleep(cast_start_delay)
+        
+        # Use separate mouse_down/mouse_up for proper casting hold with hardware input
+        virtual_mouse.mouse_down(final_cast_x, final_cast_y, 'left')  # Press down
         time.sleep(actual_hold)  # Hold for the full duration (~0.9s)
-        virtual_mouse.mouse_up(target_x, target_y, 'left')    # Release
+        virtual_mouse.mouse_up(final_cast_x, final_cast_y, 'left')    # Release
+        
+        # Phase 6: Post-cast natural behavior
+        post_cast_delay = random.uniform(0.2, 0.6)
+        print(f"🛡️ [ULTRA-STEALTH] Post-cast natural delay ({post_cast_delay:.2f}s)")
+        time.sleep(post_cast_delay)
+        
+        # Optional natural post-cast movement (50% chance)
+        if random.choice([True, False]):
+            post_move_x = final_cast_x + random.randint(-15, 15)
+            post_move_y = final_cast_y + random.randint(-15, 15)
+            virtual_mouse.move_to(post_move_x, post_move_y)
+            print(f"🛡️ [ULTRA-STEALTH] Natural post-cast movement to ({post_move_x}, {post_move_y})")
+        
+        print("✅ [ULTRA-STEALTH] Enhanced hardware casting completed")
         
     else:
-        # Fallback to pyautogui
-        offset_x = random.randint(-3, 3)
-        offset_y = random.randint(-3, 3)
-        final_x = target_x + offset_x
-        final_y = target_y + offset_y
-        
-        smooth_move_to(final_x, final_y)
-        
-        pyautogui.mouseDown(final_x, final_y, button='left')
-        time.sleep(actual_hold)
-        pyautogui.mouseUp(final_x, final_y, button='left')
+        # Fallback: Use Windows API directly for mouse control
+        try:
+            import ctypes
+            user32 = ctypes.windll.user32
+            
+            # Add random offset for human-like variation
+            offset_x = random.randint(-3, 3)
+            offset_y = random.randint(-3, 3)
+            final_x = target_x + offset_x
+            final_y = target_y + offset_y
+            
+            # Move to position
+            user32.SetCursorPos(final_x, final_y)
+            time.sleep(0.1)
+            
+            # Mouse down and up (left button)
+            MOUSEEVENTF_LEFTDOWN = 0x0002
+            MOUSEEVENTF_LEFTUP = 0x0004
+            
+            user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+            time.sleep(actual_hold)
+            user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+            
+        except Exception as e:
+            debug_log(LogCategory.ERROR, f"Fallback mouse input failed: {e}")
+            return False
     
     return True
 
@@ -212,10 +347,19 @@ def Zoom_In(x, y, duration=0.05):
     if VIRTUAL_KEYBOARD_AVAILABLE and virtual_keyboard is not None:
         virtual_keyboard.tap_key_multiple('i', 45, delay=duration)
     else:
-        # Fallback to PyAutoGUI (detectable)
-        for _ in range(45):
-            pyautogui.press('i')
-            time.sleep(duration)  # Delay for Roblox key registration
+        # Fallback: Use Windows API for key input
+        try:
+            import ctypes
+            user32 = ctypes.windll.user32
+            VK_I = 0x49  # Virtual key code for 'i'
+            KEYEVENTF_KEYUP = 0x0002
+            
+            for _ in range(45):
+                user32.keybd_event(VK_I, 0, 0, 0)  # Key down
+                user32.keybd_event(VK_I, 0, KEYEVENTF_KEYUP, 0)  # Key up
+                time.sleep(duration)
+        except Exception as e:
+            debug_log(LogCategory.ERROR, f"Zoom in fallback failed: {e}")
 
 def Zoom_Out(x, y, duration=0.05):
     # Simulate pressing 'o' four times to zoom out using VirtualKeyboard bypass.
@@ -229,10 +373,19 @@ def Zoom_Out(x, y, duration=0.05):
     if VIRTUAL_KEYBOARD_AVAILABLE and virtual_keyboard is not None:
         virtual_keyboard.tap_key_multiple('o', 4, delay=duration)
     else:
-        # Fallback to PyAutoGUI (detectable)
-        for _ in range(4):
-            pyautogui.press('o')
-            time.sleep(duration)  # Delay for Roblox key registration
+        # Fallback: Use Windows API for key input
+        try:
+            import ctypes
+            user32 = ctypes.windll.user32
+            VK_O = 0x4F  # Virtual key code for 'o'
+            KEYEVENTF_KEYUP = 0x0002
+            
+            for _ in range(4):
+                user32.keybd_event(VK_O, 0, 0, 0)  # Key down
+                user32.keybd_event(VK_O, 0, KEYEVENTF_KEYUP, 0)  # Key up
+                time.sleep(duration)
+        except Exception as e:
+            debug_log(LogCategory.ERROR, f"Zoom out fallback failed: {e}")
 
 def _match_template_multi_scale(template, region, threshold=0.7):
     """
@@ -259,9 +412,23 @@ def _match_template_multi_scale(template, region, threshold=0.7):
             debug_log(LogCategory.ERROR, f"Error: Unexpected template shape: {template.shape}")
             return False, 0.0
         
-        # Take screenshot of the region
-        screenshot = pyautogui.screenshot(region=region)
-        screenshot_cv = cv2.cvtColor(np.array(screenshot), cv2.COLOR_RGB2BGR).astype(np.uint8)
+        # Take screenshot of the region using Windows API
+        if SCREEN_CAPTURE_AVAILABLE and screenshot is not None:
+            screenshot_img = screenshot(region=region)
+        else:
+            # Final fallback - try to use PIL directly
+            try:
+                from PIL import ImageGrab
+                screenshot_img = ImageGrab.grab(bbox=region)
+            except Exception as e:
+                debug_log(LogCategory.ERROR, f"Screenshot capture failed: {e}")
+                return False, 0.0
+        
+        if screenshot_img is None:
+            debug_log(LogCategory.ERROR, "Failed to capture screenshot")
+            return False, 0.0
+        
+        screenshot_cv = cv2.cvtColor(np.array(screenshot_img), cv2.COLOR_RGB2BGR).astype(np.uint8)
         
         # Template matching with multiple scales for robustness
         scales = [0.8, 0.9, 1.0, 1.1, 1.2]  # Try different scales
@@ -448,9 +615,23 @@ def _detect_exclamation_indicator_fallback(region):
     Returns: (found: bool, confidence: float)
     """
     try:
-        # Take screenshot of the fish detection region
-        screenshot = pyautogui.screenshot(region=region)
-        screenshot_np = np.array(screenshot)
+        # Take screenshot of the fish detection region using Windows API
+        if SCREEN_CAPTURE_AVAILABLE and screenshot is not None:
+            screenshot_img = screenshot(region=region)
+        else:
+            # Final fallback - try to use PIL directly
+            try:
+                from PIL import ImageGrab
+                screenshot_img = ImageGrab.grab(bbox=region)
+            except Exception as e:
+                debug_log(LogCategory.ERROR, f"Screenshot capture failed: {e}")
+                return False, 0.0
+        
+        if screenshot_img is None:
+            debug_log(LogCategory.ERROR, "Failed to capture screenshot")
+            return False, 0.0
+        
+        screenshot_np = np.array(screenshot_img)
         screenshot_bgr = cv2.cvtColor(screenshot_np, cv2.COLOR_RGB2BGR)
         
         # Convert to HSV for better color detection
@@ -697,7 +878,7 @@ def Shift_State(x, y, duration=0.011):
     x,y are kept for API compatibility but aren't used for key presses.
     """
     # check a 200x200 region centered on screen (100px around center)
-    screen_w, screen_h = pyautogui.size()
+    screen_w, screen_h = get_screen_size()
     cx = screen_w // 2
     cy = screen_h // 2
     region = (max(0, cx - 100), max(0, cy - 100), min(200, screen_w), min(200, screen_h))
@@ -721,10 +902,18 @@ def Shift_State(x, y, duration=0.011):
             time.sleep(duration)
             virtual_keyboard.key_up('shift')
         else:
-            # Fallback to PyAutoGUI (detectable)
-            pyautogui.keyDown('shift')
-            time.sleep(duration)
-            pyautogui.keyUp('shift')
+            # Fallback: Use Windows API for key input
+            try:
+                import ctypes
+                user32 = ctypes.windll.user32
+                VK_SHIFT = 0x10  # Virtual key code for Shift
+                KEYEVENTF_KEYUP = 0x0002
+                
+                user32.keybd_event(VK_SHIFT, 0, 0, 0)  # Key down
+                time.sleep(duration)
+                user32.keybd_event(VK_SHIFT, 0, KEYEVENTF_KEYUP, 0)  # Key up
+            except Exception as e:
+                debug_log(LogCategory.ERROR, f"Shift key fallback failed: {e}")
         return True
     return False
 
@@ -788,8 +977,24 @@ def _match_template_in_region(template, region, threshold=0.80):
     
     try:
         x, y, w, h = region
-        pil = pyautogui.screenshot(region=(x, y, w, h))
-        hay = cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR)
+        
+        # Use Windows API screen capture
+        if SCREEN_CAPTURE_AVAILABLE and screenshot is not None:
+            pil_img = screenshot(region=(x, y, w, h))
+        else:
+            # Final fallback - try to use PIL directly
+            try:
+                from PIL import ImageGrab
+                pil_img = ImageGrab.grab(bbox=(x, y, x+w, y+h))
+            except Exception as e:
+                debug_log(LogCategory.ERROR, f"Screenshot capture failed: {e}")
+                return False, 0.0
+        
+        if pil_img is None:
+            debug_log(LogCategory.ERROR, "Failed to capture screenshot")
+            return False, 0.0
+        
+        hay = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
         hay_gray = cv2.cvtColor(hay, cv2.COLOR_BGR2GRAY)
         
         # Ensure we have valid images for template matching
@@ -820,8 +1025,23 @@ def _estimate_bar_fill(region, brightness_thresh=110):
         sample_x = x + int(w * 0.05)
         sample_w = max(10, int(w * 0.9))
         
-        pil = pyautogui.screenshot(region=(sample_x, sample_y, sample_w, sample_h))
-        img = cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR)
+        # Use Windows API screen capture
+        if SCREEN_CAPTURE_AVAILABLE and screenshot is not None:
+            pil_img = screenshot(region=(sample_x, sample_y, sample_w, sample_h))
+        else:
+            # Final fallback - try to use PIL directly
+            try:
+                from PIL import ImageGrab
+                pil_img = ImageGrab.grab(bbox=(sample_x, sample_y, sample_x+sample_w, sample_y+sample_h))
+            except Exception as e:
+                debug_log(LogCategory.ERROR, f"Screenshot capture failed: {e}")
+                return 0.0
+        
+        if pil_img is None:
+            debug_log(LogCategory.ERROR, "Failed to capture screenshot")
+            return 0.0
+        
+        img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         
         # Ensure we have a valid image
@@ -859,7 +1079,7 @@ def _detect_fish_direction(region=None, threshold=0.84):
     If region is None, search the full screen. Returns None when no match.
     """
     if region is None:
-        screen_w, screen_h = pyautogui.size()
+        screen_w, screen_h = get_screen_size()
         region = (0, 0, screen_w, screen_h)
 
     # prefer detector-provided templates if available
@@ -902,7 +1122,22 @@ def Fish_Left(x, y, duration=0.011):
     # search a reasonable region (full screen for now)
     direction = _detect_fish_direction(region=None, threshold=0.84)
     if direction == 'left':
-        pyautogui.click()
+        # Use Virtual Mouse for undetectable click
+        if VIRTUAL_MOUSE_AVAILABLE and virtual_mouse is not None:
+            current_x, current_y = virtual_mouse.get_cursor_pos()
+            virtual_mouse.click_at(current_x, current_y)
+        else:
+            # Fallback: Use Windows API directly
+            try:
+                import ctypes
+                user32 = ctypes.windll.user32
+                MOUSEEVENTF_LEFTDOWN = 0x0002
+                MOUSEEVENTF_LEFTUP = 0x0004
+                user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+                user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+            except Exception as e:
+                debug_log(LogCategory.ERROR, f"Click fallback failed: {e}")
+        
         time.sleep(duration)
         return True
     return False
@@ -912,7 +1147,22 @@ def Fish_Right(x, y, duration=0.011):
     """Detect right-moving fish using Fish_Right template. Returns True when detected and clicks."""
     direction = _detect_fish_direction(region=None, threshold=0.84)
     if direction == 'right':
-        pyautogui.click()
+        # Use Virtual Mouse for undetectable click
+        if VIRTUAL_MOUSE_AVAILABLE and virtual_mouse is not None:
+            current_x, current_y = virtual_mouse.get_cursor_pos()
+            virtual_mouse.click_at(current_x, current_y)
+        else:
+            # Fallback: Use Windows API directly
+            try:
+                import ctypes
+                user32 = ctypes.windll.user32
+                MOUSEEVENTF_LEFTDOWN = 0x0002
+                MOUSEEVENTF_LEFTUP = 0x0004
+                user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+                user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+            except Exception as e:
+                debug_log(LogCategory.ERROR, f"Click fallback failed: {e}")
+        
         time.sleep(duration)
         return True
     return False
@@ -957,10 +1207,23 @@ def Use_Ability_Fishing(x, y, duration=0.011):
     full_found, full_score = _match_template_in_region(power_max_tpl, region, threshold=0.84)
     if full_found:
         # power is full: press the activation key (Z)
-        try:
-            virtual_keyboard.key_press('z')
-        except:
-            pyautogui.press('z')  # fallback
+        if VIRTUAL_KEYBOARD_AVAILABLE and virtual_keyboard is not None:
+            try:
+                virtual_keyboard.key_press('z')
+            except Exception as e:
+                debug_log(LogCategory.ERROR, f"Virtual keyboard 'z' press failed: {e}")
+        else:
+            # Fallback: Use Windows API for key input
+            try:
+                import ctypes
+                user32 = ctypes.windll.user32
+                VK_Z = 0x5A  # Virtual key code for 'z'
+                KEYEVENTF_KEYUP = 0x0002
+                
+                user32.keybd_event(VK_Z, 0, 0, 0)  # Key down
+                user32.keybd_event(VK_Z, 0, KEYEVENTF_KEYUP, 0)  # Key up
+            except Exception as e:
+                debug_log(LogCategory.ERROR, f"Key press fallback failed: {e}")
         time.sleep(0.05)
         return
 
@@ -968,10 +1231,23 @@ def Use_Ability_Fishing(x, y, duration=0.011):
     fill = _estimate_bar_fill(region)
     if fill >= 0.95:
         # fallback: treat as full and press activation key
-        try:
-            virtual_keyboard.key_press('z')
-        except:
-            pyautogui.press('z')  # fallback
+        if VIRTUAL_KEYBOARD_AVAILABLE and virtual_keyboard is not None:
+            try:
+                virtual_keyboard.key_press('z')
+            except Exception as e:
+                debug_log(LogCategory.ERROR, f"Virtual keyboard 'z' press failed: {e}")
+        else:
+            # Fallback: Use Windows API for key input
+            try:
+                import ctypes
+                user32 = ctypes.windll.user32
+                VK_Z = 0x5A  # Virtual key code for 'z'
+                KEYEVENTF_KEYUP = 0x0002
+                
+                user32.keybd_event(VK_Z, 0, 0, 0)  # Key down
+                user32.keybd_event(VK_Z, 0, KEYEVENTF_KEYUP, 0)  # Key up
+            except Exception as e:
+                debug_log(LogCategory.ERROR, f"Key press fallback failed: {e}")
         time.sleep(0.05)
 
 # --- power detection helpers and defined fishing ------------------------------------^^^^
@@ -1017,10 +1293,21 @@ def execute_minigame_action(decision):
                 virtual_mouse.mouse_up(click_x, click_y, 'left')    # Left mouse up
                 time.sleep(0.01)
             else:
-                pyautogui.mouseDown(click_x, click_y, button='left')
-                time.sleep(0.01)
-                pyautogui.mouseUp(click_x, click_y, button='left')
-                time.sleep(0.01)
+                # Fallback: Use Windows API directly
+                try:
+                    import ctypes
+                    user32 = ctypes.windll.user32
+                    user32.SetCursorPos(click_x, click_y)
+                    
+                    MOUSEEVENTF_LEFTDOWN = 0x0002
+                    MOUSEEVENTF_LEFTUP = 0x0004
+                    
+                    user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+                    time.sleep(0.01)
+                    user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+                    time.sleep(0.01)
+                except Exception as e:
+                    debug_log(LogCategory.ERROR, f"Mouse operation failed: {e}")
                 
         elif action_type == 1:  # Stable left tracking
             if VIRTUAL_MOUSE_AVAILABLE and virtual_mouse is not None:
@@ -1239,14 +1526,59 @@ def main_fishing_loop():
                 else:
                     smooth_move_to(center_x, center_y)
                 
-                time.sleep(0.5)  # Brief pause before continuing
+                time.sleep(0.5)  # Brief pause after mouse movement
+                
+                # Re-check rod status after moving mouse to center to prevent EQ/UN loop
+                print("🔍 Re-checking rod status after centering mouse...")
+                verification_result = FishingRodDetector.check_region_and_act()
+                if verification_result is False:  # EQ confirmed
+                    print("✅ Rod status confirmed: EQ (equipped)")
+                    fishing_state = "casting"
+                elif verification_result is True:  # UN detected again
+                    print("⚠️ Rod reverted to UN after centering - will retry")
+                    fishing_state = "waiting"
+                    last_rod_click_time = current_time - rod_click_cooldown  # Reset cooldown
+                else:
+                    print("❓ Rod status unclear after centering - assuming equipped")
+                    fishing_state = "casting"
+                
+                time.sleep(0.3)  # Additional brief pause before continuing
                 
             elif rod_result is False:  # EQ (equipped) detected - rod is ready
                 if fishing_state == "waiting" or fishing_state == "equipping":
-                    print("✅ Rod equipped - switching to casting state")
-                    fishing_state = "casting"
-                    cast_attempts = 0
-                    time.sleep(0.5)  # Delay before entering casting state
+                    print("✅ Rod equipped - preparing for casting")
+                    
+                    # Get center coordinates for mouse positioning
+                    center_x, center_y = get_roblox_coordinates()
+                    if center_x is None or center_y is None:
+                        # Fallback to screen center
+                        screen_w, screen_h = get_screen_size()
+                        center_x, center_y = screen_w // 2, screen_h // 2
+                    
+                    # Move mouse to center before switching to casting state
+                    if VIRTUAL_MOUSE_AVAILABLE and virtual_mouse is not None:
+                        virtual_mouse.move_to(center_x, center_y)
+                    else:
+                        smooth_move_to(center_x, center_y)
+                    
+                    time.sleep(0.3)  # Brief pause after mouse movement
+                    
+                    # Re-check rod status after moving mouse to prevent state confusion
+                    verification_result = FishingRodDetector.check_region_and_act()
+                    if verification_result is False:  # EQ still confirmed
+                        print("✅ Rod status verified: EQ (equipped) - switching to casting")
+                        fishing_state = "casting"
+                        cast_attempts = 0
+                    elif verification_result is True:  # UN detected after movement
+                        print("⚠️ Rod became unequipped after mouse movement - resetting")
+                        fishing_state = "waiting"
+                        last_rod_click_time = current_time - rod_click_cooldown  # Reset cooldown
+                    else:
+                        print("❓ Rod status unclear - assuming equipped and proceeding")
+                        fishing_state = "casting"
+                        cast_attempts = 0
+                        
+                    time.sleep(0.2)  # Additional brief pause
                 else:
                     print(f"🔄 Rod equipped but already in state: {fishing_state}")
                     pass
@@ -1261,7 +1593,7 @@ def main_fishing_loop():
                 center_x, center_y = get_roblox_coordinates()
                 if center_x is None or center_y is None:
                     # Fallback to screen center
-                    screen_w, screen_h = pyautogui.size()
+                    screen_w, screen_h = get_screen_size()
                     center_x, center_y = screen_w // 2, screen_h // 2
                 
                 # Cast the rod at center position

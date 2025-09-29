@@ -2,7 +2,6 @@ customtkinter>=5.2.2
 pillow>=11.1.0
 numpy
 opencv-python
-pyautogui
 psutil
 pywin32; platform_system == "Windows"
 requests

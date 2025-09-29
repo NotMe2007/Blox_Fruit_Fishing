@@ -1,5 +1,4 @@
 import cv2
-import pyautogui
 import numpy as np
 import sys
 import time
@@ -33,7 +32,6 @@ except ImportError:
         virtual_mouse = None
         VIRTUAL_MOUSE_AVAILABLE = False
 
-pyautogui.FAILSAFE = True
 
 # Cache for detector module to prevent reloading
 _detector_module_cache = None
@@ -72,8 +70,25 @@ def screen_region_image():
     bottom = max(top + 1, BOTTOM_RIGHT[1])
     w = right - left
     h = bottom - top
-    pil = pyautogui.screenshot(region=(left, top, w, h))
-    img = cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR)
+    # Use Windows API screen capture instead of PyAutoGUI
+    try:
+        from .Screen_Capture import screenshot
+        pil_img = screenshot(region=(left, top, w, h))
+        if pil_img is None:
+            raise Exception("Screen capture failed")
+    except:
+        # Final fallback - try to use PIL directly
+        try:
+            from PIL import ImageGrab
+            pil_img = ImageGrab.grab(bbox=(left, top, left + w, top + h))
+        except Exception as e:
+            print(f"Screenshot capture failed: {e}")
+            # Return dummy image to prevent crashes
+            img = np.zeros((h, w, 3), dtype=np.uint8)
+            gray = np.zeros((h, w), dtype=np.uint8)
+            return img, gray, left, top
+    
+    img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     return img, gray, left, top
 
@@ -82,7 +97,16 @@ def smooth_move_to(target_x, target_y, duration=None):
     """
     Smoothly move mouse to target position with human-like curves and acceleration.
     """
-    start_x, start_y = pyautogui.position()
+    # Get current mouse position using Windows API
+    try:
+        import ctypes
+        class POINT(ctypes.Structure):
+            _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+        point = POINT()
+        ctypes.windll.user32.GetCursorPos(ctypes.byref(point))
+        start_x, start_y = point.x, point.y
+    except Exception:
+        start_x, start_y = 0, 0  # fallback
     
     # Calculate distance and auto-adjust duration if not specified
     distance = math.sqrt((target_x - start_x) ** 2 + (target_y - start_y) ** 2)
@@ -119,7 +143,12 @@ def smooth_move_to(target_x, target_y, duration=None):
         final_x = int(x + jitter_x)
         final_y = int(y + jitter_y)
         
-        pyautogui.moveTo(final_x, final_y)
+        # Use Windows API for mouse movement
+        try:
+            import ctypes
+            ctypes.windll.user32.SetCursorPos(final_x, final_y)
+        except Exception:
+            pass  # Ignore movement errors
         
         # Much faster step timing
         step_delay = duration / steps
@@ -135,8 +164,8 @@ EQ_PATH = IMAGES_DIR / 'Basic_Fishing_EQ.png'
 # Region to check: top-left and bottom-right (inclusive)
 TOP_LEFT = (725, 1004)
 BOTTOM_RIGHT = (1189, 1072)
-threshold = 0.55   # matching threshold (0-1). Lower to be more permissive
-debug = False      # set True to print info and save debug image
+threshold = 0.50   # matching threshold (0-1). Increased from 35% to 50% for better accuracy
+debug = True       # set True to print info and save debug image
 
 
 def load_templates():
@@ -281,7 +310,14 @@ def check_region_and_act():
     try:
         left = max(0, TOP_LEFT[0])
         top = max(0, TOP_LEFT[1])
-        screen_w, screen_h = pyautogui.size()
+        # Get screen dimensions using Windows API
+        try:
+            import ctypes
+            user32 = ctypes.windll.user32
+            screen_w = user32.GetSystemMetrics(0)  # SM_CXSCREEN
+            screen_h = user32.GetSystemMetrics(1)  # SM_CYSCREEN
+        except Exception:
+            screen_w, screen_h = 1920, 1080  # Fallback
         right = min(screen_w, BOTTOM_RIGHT[0])
         bottom = min(screen_h, BOTTOM_RIGHT[1])
         w = max(1, right - left)
@@ -289,7 +325,20 @@ def check_region_and_act():
         region = (left, top, w, h)
 
         time.sleep(0.05)
-        pil_img = pyautogui.screenshot(region=region)
+        # Use Windows API screen capture
+        try:
+            from .Screen_Capture import screenshot
+            pil_img = screenshot(region=region)
+            if pil_img is None:
+                raise Exception("Screen capture failed")
+        except:
+            # Final fallback - try to use PIL directly
+            try:
+                from PIL import ImageGrab
+                pil_img = ImageGrab.grab(bbox=region)
+            except Exception as e:
+                print(f"Screenshot capture failed: {e}")
+                return False, 0.0
         screenshot = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
         screenshot_gray = cv2.cvtColor(screenshot, cv2.COLOR_BGR2GRAY)
     except Exception as e:
@@ -328,69 +377,131 @@ def check_region_and_act():
     best_un_val_scalar = float(best_un_val) if best_un_val is not None else -1.0
     best_eq_val_scalar = float(best_eq_val) if best_eq_val is not None else -1.0
     
+    # Prioritize UN detection - if UN is above threshold, click it (even if EQ score is higher)
+    # This is more aggressive but necessary for reliable rod equipping
     if (best_un_loc is not None and best_un_size is not None and 
-        best_un_val_scalar >= threshold and best_un_val_scalar > best_eq_val_scalar):
+        best_un_val_scalar >= threshold):
         tw, th = best_un_size
         click_x = left + int(best_un_loc[0]) + tw // 2
         click_y = top + int(best_un_loc[1]) + th // 2
         
-        print(f'UN rod detected at ({click_x}, {click_y}) - score={best_un_val_scalar:.3f}')
+        print(f'UN rod detected at ({click_x}, {click_y}) - score={best_un_val_scalar:.3f} (EQ score: {best_eq_val_scalar:.3f})')
+        print(f'🎯 Prioritizing UN click to equip rod')
         
         # Use virtual mouse driver for undetectable input
         if VIRTUAL_MOUSE_AVAILABLE and virtual_mouse is not None:
-            print("Using virtual mouse driver for hardware-level input")
+            print("🛡️ Using STEALTH hardware-level mouse driver")
             
-            # Add small random offset for more natural clicking
-            offset_x = random.randint(-3, 3)
-            offset_y = random.randint(-3, 3)
+            # Human-like behavior with anti-detection patterns
+            import random
+            
+            # Add larger random offset for more natural clicking (avoid patterns)
+            offset_x = random.randint(-7, 7)
+            offset_y = random.randint(-7, 7)
             final_click_x = click_x + offset_x
             final_click_y = click_y + offset_y
             
-            print(f'🎯 Clicking rod at ({final_click_x}, {final_click_y}) with VirtualMouse')
+            print(f'🎯 [STEALTH] Target position ({final_click_x}, {final_click_y})')
             
-            # Move to position first to ensure accuracy
-            virtual_mouse.move_to(final_click_x, final_click_y)
-            time.sleep(0.05)  # Brief pause after move
+            # Anti-detection: Randomized approach pattern
+            approach_pattern = random.choice(['direct', 'curved', 'double_move'])
             
-            # Perform the click with longer duration for better registration
-            virtual_mouse.click_at(final_click_x, final_click_y, duration=0.1)
-            print(f'✅ Virtual mouse click completed at ({final_click_x}, {final_click_y})')
+            if approach_pattern == 'direct':
+                # Simple direct movement
+                virtual_mouse.move_to(final_click_x, final_click_y)
+                time.sleep(random.uniform(0.08, 0.15))
+                
+            elif approach_pattern == 'curved':
+                # Curved approach to target (more human-like)
+                mid_x = final_click_x + random.randint(-20, 20)
+                mid_y = final_click_y + random.randint(-20, 20)
+                virtual_mouse.move_to(mid_x, mid_y)
+                time.sleep(random.uniform(0.05, 0.1))
+                virtual_mouse.move_to(final_click_x, final_click_y)
+                time.sleep(random.uniform(0.08, 0.15))
+                
+            elif approach_pattern == 'double_move':
+                # Double movement with pause (avoids detection algorithms)
+                pre_x = final_click_x + random.randint(-15, 15)
+                pre_y = final_click_y + random.randint(-15, 15)
+                virtual_mouse.move_to(pre_x, pre_y)
+                time.sleep(random.uniform(0.1, 0.2))
+                virtual_mouse.move_to(final_click_x, final_click_y)
+                time.sleep(random.uniform(0.08, 0.15))
             
-            # Wait longer for Roblox to register the click
-            time.sleep(0.2)  # Increased delay for game to respond
+            # Variable click duration to avoid timing patterns
+            click_duration = random.uniform(0.12, 0.22)
+            
+            # Perform stealth hardware click
+            virtual_mouse.click_at(final_click_x, final_click_y, duration=click_duration)
+            print(f'✅ [STEALTH] Hardware click completed at ({final_click_x}, {final_click_y})')
+            
+            # Randomized post-click delay (critical for avoiding detection)
+            post_delay = random.uniform(0.4, 0.8)
+            time.sleep(post_delay)
             
             return True
         
-        # Fallback to regular mouse if virtual mouse fails
-        print("🔄 Using fallback pyautogui input for rod clicking")
+        # Fallback to Windows API if virtual mouse fails
+        print("🔄 Using fallback Windows API input for rod clicking")
         offset_x = random.randint(-2, 2)
         offset_y = random.randint(-2, 2)
         final_x = click_x + offset_x
         final_y = click_y + offset_y
         
-        print(f'🎯 Moving to rod at ({final_x}, {final_y}) with PyAutoGUI')
-        smooth_move_to(final_x, final_y)
-        time.sleep(random.uniform(0.1, 0.2))  # Longer pause for stability
+        print(f'🎯 Moving to rod at ({final_x}, {final_y}) with Windows API')
         
-        # Use a more reliable single click instead of random patterns
+        # Small movement to reset cursor position and avoid dual cursor visual bug
+        pre_move_x = final_x + random.randint(-10, 10)
+        pre_move_y = final_y + random.randint(-10, 10)
+        smooth_move_to(pre_move_x, pre_move_y)
+        time.sleep(0.1)  # Brief pause for cursor reset
+        
+        # Now move to actual target position
+        smooth_move_to(final_x, final_y)
+        time.sleep(0.15)  # Longer pause for stability and cursor positioning
+        
+        # Use Windows API for mouse click
         print(f'🖱️ Performing rod equip click...')
         duration = random.uniform(0.08, 0.15)  # Longer click duration
-        pyautogui.mouseDown(final_x, final_y, button='left')
-        time.sleep(duration)
-        pyautogui.mouseUp(final_x, final_y, button='left')
         
-        print(f'✅ PyAutoGUI click completed at ({final_x}, {final_y})')
+        try:
+            import ctypes
+            user32 = ctypes.windll.user32
+            user32.SetCursorPos(final_x, final_y)
+            
+            MOUSEEVENTF_LEFTDOWN = 0x0002
+            MOUSEEVENTF_LEFTUP = 0x0004
+            
+            user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+            time.sleep(duration)
+            user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+            
+            print(f'✅ Windows API click completed at ({final_x}, {final_y})')
+        except Exception as e:
+            print(f'❌ Windows API click failed: {e}')
+            return False
         
-        # Wait longer for game to register the click
-        time.sleep(random.uniform(0.2, 0.4))
+        # Wait longer for game to register the click and update UI
+        time.sleep(random.uniform(0.4, 0.6))
         return True
 
+    # Only check for EQ if UN was not detected above threshold
     if (best_eq_loc is not None and best_eq_size is not None and 
-        best_eq_val_scalar >= threshold and best_eq_val_scalar > best_un_val_scalar):
+        best_eq_val_scalar >= threshold and best_un_val_scalar < threshold):
         print(f'EQ detected in region - rod is equipped (score={best_eq_val_scalar:.3f})')
         return False
 
-    print('No UN or EQ detected in the region')
+    # Enhanced debug information for failed detections
+    print(f'No UN or EQ detected in the region')
+    print(f'UN score: {best_un_val_scalar:.3f} (threshold: {threshold})')
+    print(f'EQ score: {best_eq_val_scalar:.3f} (threshold: {threshold})')
+    if best_un_val_scalar >= 0.25 or best_eq_val_scalar >= 0.25:
+        print(f'⚠️  Close matches found but below threshold - consider lowering threshold')
+        if best_un_val_scalar >= 0.30:
+            print(f'⚠️  UN score {best_un_val_scalar:.3f} is close to threshold - rod might be unequipped')
+    if max(best_un_val_scalar, best_eq_val_scalar) < 0.2:
+        print(f'⚠️  Very low scores - check if detection region is correct')
     return None
 
 

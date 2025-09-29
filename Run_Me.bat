@@ -147,7 +147,6 @@ if not exist "requirements.txt" (
     echo opencv-python^>=4.8.0> requirements.txt
     echo numpy^>=1.21.0>> requirements.txt
     echo pillow^>=8.3.0>> requirements.txt
-    echo pyautogui^>=0.9.53>> requirements.txt
     echo psutil^>=5.8.0>> requirements.txt
     echo keyboard^>=0.13.5>> requirements.txt
     echo customtkinter^>=5.0.0>> requirements.txt
@@ -164,7 +163,7 @@ if %ERRORLEVEL% NEQ 0 (
     
     :: Try installing core packages individually
     echo Installing core packages...
-    %PIP_CMD% install opencv-python numpy pillow pyautogui
+    %PIP_CMD% install opencv-python numpy pillow
     if %ERRORLEVEL% NEQ 0 (
         echo ❌ Critical dependency installation failed
         echo.

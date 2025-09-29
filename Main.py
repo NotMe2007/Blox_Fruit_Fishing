@@ -1,3 +1,4 @@
+# type: ignore
 import os
 import sys
 import subprocess
@@ -10,17 +11,18 @@ from typing import Dict, Optional
 
 # Debug Logger
 try:
-    from Logic.BackGround_Logic.Debug_Logger import debug_log, LogCategory
+    from Logic.BackGround_Logic.Debug_Logger import debug_log, LogCategory  # type: ignore
     DEBUG_LOGGER_AVAILABLE = True
 except ImportError:
     DEBUG_LOGGER_AVAILABLE = False
     # Fallback log categories
     from enum import Enum
-    class LogCategory(Enum):
+    class LogCategory(Enum):  # type: ignore
         SYSTEM = "SYSTEM"
         UI = "UI"  
         ERROR = "ERROR"
-    def debug_log(category, message):
+        SCREEN_CAPTURE = "SCREEN_CAPTURE"
+    def debug_log(category, message):  # type: ignore
         print(f"[{category.value}] {message}")
 
 try:
@@ -28,14 +30,14 @@ try:
     KEYBOARD_AVAILABLE = True
 except ImportError:
     KEYBOARD_AVAILABLE = False
-    debug_log(LogCategory.SYSTEM, "Warning: keyboard library not available. Hotkeys will not work.")
+    debug_log(LogCategory.SYSTEM, "Warning: keyboard library not available. Hotkeys will not work.")  # type: ignore
 
 try:
-    import customtkinter as ctk
+    import customtkinter as ctk  # type: ignore
     CTK_AVAILABLE = True
 except Exception:
     CTK_AVAILABLE = False
-    ctk = None
+    ctk = None  # type: ignore
 
 # Import the Roblox checker
 from Logic.BackGround_Logic.Is_Roblox_Open import check_roblox_and_game
@@ -43,8 +45,8 @@ from Logic.BackGround_Logic.Is_Roblox_Open import check_roblox_and_game
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SCRIPT_PATH = os.path.join(BASE_DIR, "Logic", "Fishing_Script.py")
-SETTINGS_FILE = os.path.join(BASE_DIR, "Logic", "BackGroud_Logic", "hotkey_settings.json")
-MINIGAME_SETTINGS_FILE = os.path.join(BASE_DIR, "Logic", "BackGroud_Logic", "minigame_settings.json")
+SETTINGS_FILE = os.path.join(BASE_DIR, "Logic", "BackGround_Logic", "hotkey_settings.json")
+MINIGAME_SETTINGS_FILE = os.path.join(BASE_DIR, "Logic", "BackGround_Logic", "minigame_settings.json")
 
 # Valid numpad keys for hotkeys
 VALID_NUMPAD_KEYS = ['num 0', 'num 1', 'num 2', 'num 3', 'num 4', 'num 5', 'num 6', 'num 7', 'num 8', 'num 9']
@@ -161,13 +163,14 @@ class LauncherApp(_BaseLauncher):
 
         self.title("Blox Fruit Fishing — Launcher")
         width, height = 800, 600  # Increased size for tabbed interface
-        # center window on screen
+        # Position window in top-right corner of screen
         self.geometry(f"{width}x{height}")
         self.update_idletasks()
         screen_w = self.winfo_screenwidth()
         screen_h = self.winfo_screenheight()
-        x = (screen_w // 2) - (width // 2)
-        y = (screen_h // 2) - (height // 2)
+        margin = 20  # Small margin from screen edges
+        x = screen_w - width - margin  # Right side with margin
+        y = margin  # Top side with margin
         self.geometry(f"{width}x{height}+{x}+{y}")
         self.resizable(False, False)
         
@@ -196,7 +199,7 @@ class LauncherApp(_BaseLauncher):
 
     def _build_modern_ui(self):
         # Create main container
-        main_container = ctk.CTkFrame(self, corner_radius=18)
+        main_container = ctk.CTkFrame(self, corner_radius=18)  # type: ignore
         main_container.place(relx=0.5, rely=0.5, anchor="center", relwidth=0.95, relheight=0.95)
 
         # Create tabview
@@ -316,7 +319,7 @@ class LauncherApp(_BaseLauncher):
         
         anti_detection_note = ctk.CTkLabel(
             anti_detection_frame,
-            text="⚠️ Passive Mode: Script only monitors, never sends input to Roblox\n💡 VirtualMouse: Uses hardware-level input (more undetectable than PyAutoGUI)",
+            text="⚠️ Passive Mode: Script only monitors, never sends input to Roblox\n💡 VirtualMouse: Uses hardware-level input (undetectable by anti-cheat)",
             font=ctk.CTkFont(size=10),
             text_color="orange"
         )

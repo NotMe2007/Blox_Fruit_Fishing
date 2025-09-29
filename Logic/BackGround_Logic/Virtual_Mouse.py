@@ -5,6 +5,8 @@ Uses low-level Windows API calls to simulate hardware mouse input.
 import ctypes
 import ctypes.wintypes
 import time
+import math
+import random
 from typing import Tuple, Optional
 
 # Debug Logger
@@ -183,20 +185,21 @@ class VirtualMouse:
         return input_struct
     
     def move_to(self, x: int, y: int):
-        """Move mouse to specific coordinates."""
+        """Move mouse to specific coordinates using reliable Windows API."""
         try:
-            debug_log(LogCategory.MOUSE, f"Moving mouse to ({x}, {y})")
+            debug_log(LogCategory.MOUSE, f"🖱️ [STEALTH] Moving to ({x}, {y})")
             
             # Ensure coordinates are within screen bounds
             x = max(0, min(x, self.primary_width - 1))
             y = max(0, min(y, self.primary_height - 1))
             
-            # Use SetCursorPos for simple, reliable mouse movement
+            # Use reliable SetCursorPos for movement
             result = self.user32.SetCursorPos(x, y)
+            
             if result:
-                debug_log(LogCategory.MOUSE, f"✅ Mouse moved to ({x}, {y})")
+                debug_log(LogCategory.MOUSE, f"✅ [STEALTH] Move completed to ({x}, {y})")
             else:
-                debug_log(LogCategory.ERROR, f"❌ Failed to move mouse to ({x}, {y})")
+                debug_log(LogCategory.ERROR, f"❌ Move failed to ({x}, {y})")
                 
         except Exception as e:
             debug_log(LogCategory.ERROR, f"❌ Move failed to ({x}, {y}): {e}")
@@ -236,38 +239,155 @@ class VirtualMouse:
             self.move_to(x, y)
     
     def click_at(self, x: int, y: int, button: str = 'left', duration: float = 0.05):
-        """Simple and reliable click method using basic Windows API."""
+        """Enhanced stealth click method with advanced anti-detection features."""
         try:
-            debug_log(LogCategory.MOUSE, f"🖱️ Clicking at ({x}, {y}) with {button} button")
+            debug_log(LogCategory.MOUSE, f"�️ [ULTRA-STEALTH] Initiating enhanced click at ({x}, {y})")
             
             # Ensure coordinates are within screen bounds
             x = max(0, min(x, self.primary_width - 1))
             y = max(0, min(y, self.primary_height - 1))
             
-            # Move to position first
-            self.user32.SetCursorPos(x, y)
-            time.sleep(0.01)  # Small delay to ensure position is set
+            # Get current mouse position for natural movement
+            current_pos = POINT()
+            self.user32.GetCursorPos(ctypes.byref(current_pos))
+            start_x, start_y = current_pos.x, current_pos.y
+            
+            # Add stronger anti-detection randomization
+            import random
+            jitter_x = random.randint(-5, 5)  # Increased jitter range
+            jitter_y = random.randint(-5, 5)
+            final_x = max(0, min(x + jitter_x, self.primary_width - 1))
+            final_y = max(0, min(y + jitter_y, self.primary_height - 1))
+            
+            # Phase 1: Natural approach movement (critical for anti-detection)
+            distance = ((final_x - start_x) ** 2 + (final_y - start_y) ** 2) ** 0.5
+            if distance > 10:  # Only do approach if movement is significant
+                # Calculate intermediate positions for human-like movement
+                approach_distance = random.randint(15, 35)  # Distance from target for approach
+                angle = random.uniform(0, 2 * 3.14159)  # Random approach angle
+                
+                approach_x = final_x + int(approach_distance * math.cos(angle))
+                approach_y = final_y + int(approach_distance * math.sin(angle))
+                
+                # Ensure approach point is on screen
+                approach_x = max(0, min(approach_x, self.primary_width - 1))
+                approach_y = max(0, min(approach_y, self.primary_height - 1))
+                
+                debug_log(LogCategory.MOUSE, f"🛡️ [ULTRA-STEALTH] Natural approach via ({approach_x}, {approach_y})")
+                
+                # Move to approach position with human-like curve
+                self.human_like_move(start_x, start_y, approach_x, approach_y, random.uniform(0.2, 0.5))
+                
+                # Brief pause at approach position (human hesitation)
+                time.sleep(random.uniform(0.1, 0.3))
+                
+                # Final approach to target with slight curve
+                self.human_like_move(approach_x, approach_y, final_x, final_y, random.uniform(0.1, 0.25))
+            else:
+                # Short distance - just add slight randomized movement
+                self.user32.SetCursorPos(final_x, final_y)
+            
+            # Phase 2: Pre-click stabilization (critical anti-detection)
+            time.sleep(random.uniform(0.05, 0.15))  # Human stabilization delay
+            
+            # Phase 3: Enhanced click execution with variable timing
+            click_duration = duration + random.uniform(-0.03, 0.08)  # More variable duration
+            click_duration = max(0.02, click_duration)  # Minimum reasonable duration
             
             if button == 'left':
-                # Left click
+                debug_log(LogCategory.MOUSE, f"🛡️ [ULTRA-STEALTH] Hardware left click (duration: {click_duration:.3f}s)")
                 self.user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-                time.sleep(duration)
+                time.sleep(click_duration)
                 self.user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-                debug_log(LogCategory.MOUSE, f"✅ Left click completed at ({x}, {y})")
+                
             elif button == 'right':
-                # Right click
+                debug_log(LogCategory.MOUSE, f"🛡️ [ULTRA-STEALTH] Hardware right click (duration: {click_duration:.3f}s)")
                 self.user32.mouse_event(MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0)
-                time.sleep(duration)
+                time.sleep(click_duration)
                 self.user32.mouse_event(MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0)
-                debug_log(LogCategory.MOUSE, f"✅ Right click completed at ({x}, {y})")
+                
             else:
                 raise ValueError("Button must be 'left' or 'right'")
-                
+            
+            # Phase 4: Post-click natural behavior
+            post_click_delay = random.uniform(0.1, 0.4)  # Human post-click delay
+            time.sleep(post_click_delay)
+            
+            # Optional: Small post-click movement to simulate natural mouse behavior
+            if random.choice([True, False]):  # 50% chance of small post-click movement
+                small_move_x = final_x + random.randint(-3, 3)
+                small_move_y = final_y + random.randint(-3, 3)
+                small_move_x = max(0, min(small_move_x, self.primary_width - 1))
+                small_move_y = max(0, min(small_move_y, self.primary_height - 1))
+                self.user32.SetCursorPos(small_move_x, small_move_y)
+                debug_log(LogCategory.MOUSE, f"🛡️ [ULTRA-STEALTH] Natural post-click movement to ({small_move_x}, {small_move_y})")
+            
+            debug_log(LogCategory.MOUSE, f"✅ [ULTRA-STEALTH] Enhanced click sequence completed at ({final_x}, {final_y})")
             return True
             
         except Exception as e:
-            debug_log(LogCategory.ERROR, f"❌ Click failed at ({x}, {y}): {e}")
+            debug_log(LogCategory.ERROR, f"❌ Enhanced click failed at ({x}, {y}): {e}")
             return False
+    
+    def human_like_move(self, start_x: int, start_y: int, end_x: int, end_y: int, duration: float = 0.3):
+        """Move mouse with human-like curved path and variable speed."""
+        try:
+            import random
+            import math
+            
+            # Calculate steps for smooth movement with variable speed
+            steps = max(8, int(duration * 30))  # 30 FPS base with minimum steps
+            
+            # Add curve to movement for more human-like behavior
+            curve_intensity = random.uniform(0.1, 0.4)  # How much curve to add
+            curve_direction = random.choice([-1, 1])  # Curve left or right
+            
+            for i in range(steps + 1):
+                progress = i / steps
+                
+                # Use variable speed (slow start, fast middle, slow end)
+                ease_progress = self.ease_in_out_cubic(progress)
+                
+                # Calculate base position
+                current_x = start_x + (end_x - start_x) * ease_progress
+                current_y = start_y + (end_y - start_y) * ease_progress
+                
+                # Add curve to make movement more human-like
+                if i > 0 and i < steps:  # Don't curve at start/end points
+                    curve_offset = math.sin(progress * math.pi) * curve_intensity * curve_direction
+                    # Apply curve perpendicular to movement direction
+                    dx = end_x - start_x
+                    dy = end_y - start_y
+                    length = math.sqrt(dx*dx + dy*dy)
+                    if length > 0:
+                        # Perpendicular vector for curve
+                        perp_x = -dy / length
+                        perp_y = dx / length
+                        current_x += perp_x * curve_offset * 20  # Scale curve
+                        current_y += perp_y * curve_offset * 20
+                
+                # Ensure coordinates are valid
+                current_x = int(max(0, min(current_x, self.primary_width - 1)))
+                current_y = int(max(0, min(current_y, self.primary_height - 1)))
+                
+                self.user32.SetCursorPos(current_x, current_y)
+                
+                if i < steps:  # Don't sleep on last iteration
+                    # Variable speed timing with small random variations
+                    step_delay = (duration / steps) * random.uniform(0.7, 1.3)
+                    time.sleep(step_delay)
+                    
+        except Exception as e:
+            debug_log(LogCategory.ERROR, f"❌ Human-like move failed: {e}")
+            # Fallback to direct movement
+            self.user32.SetCursorPos(end_x, end_y)
+    
+    def ease_in_out_cubic(self, t: float) -> float:
+        """Easing function for natural acceleration/deceleration."""
+        if t < 0.5:
+            return 4 * t * t * t
+        else:
+            return 1 - pow(-2 * t + 2, 3) / 2
 
     def drag(self, start_x: int, start_y: int, end_x: int, end_y: int, duration: float = 0.1):
         """
