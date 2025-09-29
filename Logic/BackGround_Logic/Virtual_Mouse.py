@@ -9,6 +9,15 @@ import math
 import random
 from typing import Tuple, Optional
 
+# Win32 API for PostMessage stealth clicking (bypasses anti-cheat)
+try:
+    import win32api
+    import win32con
+    import win32gui
+    WIN32_AVAILABLE = True
+except ImportError:
+    WIN32_AVAILABLE = False
+
 # Debug Logger
 try:
     from .Debug_Logger import debug_log, LogCategory
@@ -238,10 +247,68 @@ class VirtualMouse:
             # Fallback to regular move
             self.move_to(x, y)
     
-    def click_at(self, x: int, y: int, button: str = 'left', duration: float = 0.05):
-        """Enhanced stealth click method with advanced anti-detection features."""
+    def ultimate_stealth_click(self, x: int, y: int, button: str = 'left', duration: float = 0.05):
+        """
+        ULTIMATE STEALTH CLICK: Automatically chooses the best clicking method.
+        Priority: PostMessage stealth > Regular enhanced click
+        """
         try:
-            debug_log(LogCategory.MOUSE, f"�️ [ULTRA-STEALTH] Initiating enhanced click at ({x}, {y})")
+            # Try to get Roblox window handle for stealth clicking
+            if WIN32_AVAILABLE:
+                try:
+                    from .Window_Manager import get_roblox_hwnd
+                    hwnd = get_roblox_hwnd()
+                    
+                    if hwnd:
+                        debug_log(LogCategory.MOUSE, f"🎯 [ULTIMATE-STEALTH] Using PostMessage stealth click")
+                        
+                        # Convert screen coordinates to window-relative coordinates
+                        # For PostMessage, we need coordinates relative to the window client area
+                        import win32gui
+                        window_rect = win32gui.GetWindowRect(hwnd)
+                        client_rect = win32gui.GetClientRect(hwnd)
+                        
+                        # Calculate the offset for window borders/title bar
+                        border_x = (window_rect[2] - window_rect[0] - client_rect[2]) // 2
+                        title_height = window_rect[3] - window_rect[1] - client_rect[3] - border_x
+                        
+                        # Convert to window-relative coordinates
+                        window_x = x - window_rect[0] - border_x
+                        window_y = y - window_rect[1] - title_height
+                        
+                        # Ensure coordinates are within the client area
+                        window_x = max(0, min(window_x, client_rect[2] - 1))
+                        window_y = max(0, min(window_y, client_rect[3] - 1))
+                        
+                        debug_log(LogCategory.MOUSE, f"🕵️ [ULTIMATE-STEALTH] Screen ({x},{y}) -> Window ({window_x},{window_y})")
+                        
+                        # Use stealth PostMessage clicking
+                        return self.stealth_click_window(hwnd, window_x, window_y, button)
+                        
+                except ImportError:
+                    debug_log(LogCategory.MOUSE, "⚠️ Window Manager not available, using regular enhanced click")
+                except Exception as e:
+                    debug_log(LogCategory.MOUSE, f"⚠️ Stealth click setup failed: {e}, falling back to enhanced click")
+            
+            # Fallback to regular enhanced clicking
+            debug_log(LogCategory.MOUSE, f"🎯 [ULTIMATE-STEALTH] Using enhanced hardware click as fallback")
+            return self.click_at(x, y, button, duration)
+            
+        except Exception as e:
+            debug_log(LogCategory.ERROR, f"❌ Ultimate stealth click failed: {e}")
+            return False
+    
+    def click_at(self, x: int, y: int, button: str = 'left', duration: float = 0.05):
+        """
+        Enhanced stealth click method with AHK-style window focus.
+        Based on Reddit post: Window focus before clicking is CRITICAL for Roblox automation.
+        """
+        try:
+            debug_log(LogCategory.MOUSE, f"🎯 [ULTRA-STEALTH] Initiating enhanced click at ({x}, {y})")
+            
+            # CRITICAL: Ensure Roblox window is focused before clicking (AHK-style)
+            # This was the key insight from the Reddit post that made automation work
+            self._ensure_window_focus_before_click()
             
             # Ensure coordinates are within screen bounds
             x = max(0, min(x, self.primary_width - 1))
@@ -327,6 +394,61 @@ class VirtualMouse:
             
         except Exception as e:
             debug_log(LogCategory.ERROR, f"❌ Enhanced click failed at ({x}, {y}): {e}")
+            return False
+    
+    def stealth_click_window(self, hwnd, x: int, y: int, button: str = 'left'):
+        """
+        ULTIMATE STEALTH: PostMessage clicking that bypasses anti-cheat.
+        Key insight: Click BEFORE bringing window to front = Undetectable
+        This method clicks while window is in background, then optionally brings to front.
+        """
+        if not WIN32_AVAILABLE:
+            debug_log(LogCategory.ERROR, "❌ Win32 API not available for stealth clicking")
+            return False
+            
+        try:
+            debug_log(LogCategory.MOUSE, f"🕵️ [STEALTH-CLICK] PostMessage click at ({x}, {y}) in background window")
+            
+            # Convert screen coordinates to window client coordinates
+            # Note: For PostMessage, we might need to adjust coordinates based on window position
+            
+            # Add human-like randomization
+            jitter_x = random.randint(-2, 2)
+            jitter_y = random.randint(-2, 2)
+            final_x = x + jitter_x
+            final_y = y + jitter_y
+            
+            # Create lParam for coordinates
+            lParam = win32api.MAKELONG(final_x, final_y)
+            
+            if button == 'left':
+                debug_log(LogCategory.MOUSE, f"🕵️ [STEALTH-CLICK] Background left click via PostMessage")
+                # Send mouse down
+                win32gui.PostMessage(hwnd, win32con.WM_LBUTTONDOWN, win32con.MK_LBUTTON, lParam)
+                # Human-like click duration
+                time.sleep(random.uniform(0.03, 0.08))
+                # Send mouse up
+                win32gui.PostMessage(hwnd, win32con.WM_LBUTTONUP, 0, lParam)
+                
+            elif button == 'right':
+                debug_log(LogCategory.MOUSE, f"🕵️ [STEALTH-CLICK] Background right click via PostMessage")
+                # Send mouse down
+                win32gui.PostMessage(hwnd, win32con.WM_RBUTTONDOWN, win32con.MK_RBUTTON, lParam)
+                # Human-like click duration
+                time.sleep(random.uniform(0.03, 0.08))
+                # Send mouse up
+                win32gui.PostMessage(hwnd, win32con.WM_RBUTTONUP, 0, lParam)
+            else:
+                raise ValueError("Button must be 'left' or 'right'")
+            
+            # Small delay for message processing
+            time.sleep(random.uniform(0.02, 0.05))
+            
+            debug_log(LogCategory.MOUSE, f"✅ [STEALTH-CLICK] PostMessage click completed successfully")
+            return True
+            
+        except Exception as e:
+            debug_log(LogCategory.ERROR, f"❌ Stealth click failed: {e}")
             return False
     
     def human_like_move(self, start_x: int, start_y: int, end_x: int, end_y: int, duration: float = 0.3):
@@ -447,6 +569,38 @@ class VirtualMouse:
         
         up_input = self._create_mouse_input(abs_x, abs_y, flag | MOUSEEVENTF_ABSOLUTE)
         self._send_input(up_input)
+
+    def _ensure_window_focus_before_click(self):
+        """
+        Ensure Roblox window is properly focused before clicking.
+        
+        Based on Reddit post: This AHK-style window focus is CRITICAL for Roblox automation.
+        Without proper focus, clicks are detected/blocked by Roblox anti-automation.
+        """
+        try:
+            # Import Window Manager for focus functionality
+            try:
+                from .Window_Manager import ensure_roblox_focused
+            except ImportError:
+                try:
+                    from Window_Manager import ensure_roblox_focused
+                except ImportError:
+                    debug_log(LogCategory.MOUSE, "⚠️ Window Manager not available - skipping focus")
+                    return
+            
+            # Critical: Ensure Roblox is focused before every click
+            focus_success = ensure_roblox_focused()
+            
+            if focus_success:
+                debug_log(LogCategory.MOUSE, "✅ [AHK-STYLE] Window focus confirmed before click")
+                # Small delay to let focus settle (critical for automation detection)
+                time.sleep(0.05)
+            else:
+                debug_log(LogCategory.MOUSE, "⚠️ [AHK-STYLE] Window focus may have failed - proceeding anyway")
+                
+        except Exception as e:
+            debug_log(LogCategory.ERROR, f"Window focus error: {e}")
+            # Continue with click even if focus fails
 
 
 # Global instance for easy access

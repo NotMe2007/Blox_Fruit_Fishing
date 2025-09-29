@@ -432,9 +432,12 @@ def check_region_and_act():
             # Variable click duration to avoid timing patterns
             click_duration = random.uniform(0.12, 0.22)
             
-            # Perform stealth hardware click
-            virtual_mouse.click_at(final_click_x, final_click_y, duration=click_duration)
-            print(f'✅ [STEALTH] Hardware click completed at ({final_click_x}, {final_click_y})')
+            # Perform ultra-stealth PostMessage click
+            success = virtual_mouse.ultimate_stealth_click(final_click_x, final_click_y)
+            if success:
+                print(f'🛡️ [ULTRA-STEALTH] PostMessage rod click completed at ({final_click_x}, {final_click_y})')
+            else:
+                print(f'🛡️ [ULTRA-STEALTH] Fallback rod click completed at ({final_click_x}, {final_click_y})')
             
             # Randomized post-click delay (critical for avoiding detection)
             post_delay = random.uniform(0.4, 0.8)
@@ -442,49 +445,32 @@ def check_region_and_act():
             
             return True
         
-        # Fallback to Windows API if virtual mouse fails
-        print("🔄 Using fallback Windows API input for rod clicking")
+        # Fallback to ultra-stealth if virtual mouse initialization fails
+        print("�️ [ULTRA-STEALTH] Using ultimate stealth click for rod clicking")
+        import random
         offset_x = random.randint(-2, 2)
         offset_y = random.randint(-2, 2)
         final_x = click_x + offset_x
         final_y = click_y + offset_y
         
-        print(f'🎯 Moving to rod at ({final_x}, {final_y}) with Windows API')
+        print(f'🛡️ [ULTRA-STEALTH] Moving to rod at ({final_x}, {final_y}) with PostMessage')
         
-        # Small movement to reset cursor position and avoid dual cursor visual bug
-        pre_move_x = final_x + random.randint(-10, 10)
-        pre_move_y = final_y + random.randint(-10, 10)
-        smooth_move_to(pre_move_x, pre_move_y)
-        time.sleep(0.1)  # Brief pause for cursor reset
-        
-        # Now move to actual target position
-        smooth_move_to(final_x, final_y)
-        time.sleep(0.15)  # Longer pause for stability and cursor positioning
-        
-        # Use Windows API for mouse click
-        print(f'🖱️ Performing rod equip click...')
-        duration = random.uniform(0.08, 0.15)  # Longer click duration
-        
+        # Import Virtual_Mouse for fallback
         try:
-            import ctypes
-            user32 = ctypes.windll.user32
-            user32.SetCursorPos(final_x, final_y)
+            from . import Virtual_Mouse
+            fallback_mouse = Virtual_Mouse.VirtualMouse()
+            success = fallback_mouse.ultimate_stealth_click(final_x, final_y)
+            if success:
+                print(f'�️ [ULTRA-STEALTH] PostMessage fallback rod click completed at ({final_x}, {final_y})')
+            else:
+                print(f'🛡️ [ULTRA-STEALTH] Enhanced fallback rod click completed at ({final_x}, {final_y})')
             
-            MOUSEEVENTF_LEFTDOWN = 0x0002
-            MOUSEEVENTF_LEFTUP = 0x0004
-            
-            user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-            time.sleep(duration)
-            user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-            
-            print(f'✅ Windows API click completed at ({final_x}, {final_y})')
+            # Wait longer for game to register the click and update UI
+            time.sleep(random.uniform(0.4, 0.6))
+            return True
         except Exception as e:
-            print(f'❌ Windows API click failed: {e}')
+            print(f'❌ Ultimate stealth fallback failed: {e}')
             return False
-        
-        # Wait longer for game to register the click and update UI
-        time.sleep(random.uniform(0.4, 0.6))
-        return True
 
     # Only check for EQ if UN was not detected above threshold
     if (best_eq_loc is not None and best_eq_size is not None and 

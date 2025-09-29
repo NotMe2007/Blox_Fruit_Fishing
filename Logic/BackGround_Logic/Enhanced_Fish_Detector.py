@@ -256,7 +256,7 @@ class EnhancedFishDetector:
                 score = self._analyze_exclamation_contour(contour, screenshot_bgr)
                 best_score = max(best_score, score)
                 
-                if score > 0.6:  # High confidence shape match
+                if score > 0.8:  # Much higher confidence required for shape match to reduce false positives
                     return True, score
                     
             return False, best_score

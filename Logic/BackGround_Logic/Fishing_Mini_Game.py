@@ -2,7 +2,7 @@
 Fishing minigame logic ported from FischV12.ahk
 
 This module implements the AHK fishing minigame logic with 6 action types:
-0 = stabilize (rapid clicking for minor correction)
+0 = stabilize (single quick click for minor correction)
 1 = stable left tracking (moderate left movement with counter-strafe)
 2 = stable right tracking (moderate right movement with counter-strafe)  
 3 = max left boundary (indicator too far right, strong left correction)
@@ -243,7 +243,7 @@ class MinigameController:
         """
         AHK minigame decision logic with 6 action types:
         
-        Action 0 = stabilize (rapid clicking for minor correction)
+        Action 0 = stabilize (single quick click for minor correction)
         Action 1 = stable left tracking (moderate left with counter-strafe)
         Action 2 = stable right tracking (moderate right with counter-strafe)
         Action 3 = max left boundary (strong left correction)
@@ -1019,6 +1019,7 @@ def handle_fishing_minigame(minigame_controller):
             # Only end minigame after 3 consecutive failures
             if _minigame_detection_failures >= 3:
                 print("❌ Minigame UI not detected for 3 attempts, ending minigame...")
+                print(f"🔍 [DEBUG] Detection failed 3 times - returning True to end minigame")
                 _minigame_detection_failures = 0  # Reset counter
                 return True
             else:
@@ -1074,6 +1075,7 @@ def handle_fishing_minigame(minigame_controller):
         
     except Exception as e:
         print(f"Error in minigame handler: {e}")
+        print(f"🔍 [DEBUG] Exception in minigame handler - returning True to end minigame")
         return True  # End minigame on error
 
 
@@ -1132,32 +1134,22 @@ def execute_minigame_action(decision):
             debug_log(LogCategory.ERROR, "VirtualMouse not available - cannot execute minigame actions without detection")
             return
             
-        if action_type == 0:  # Stabilize - continuous rapid clicking at 5.6 CPS
-            click_interval = decision.get("click_interval", 0.178)  # 5.6 CPS
-            stabilize_duration = decision.get("stabilize_duration", 1.0)
+        if action_type == 0:  # Stabilize - single quick click (AHK style)
+            print(f"🎯 [MINIGAME] Stabilizing with single quick click (AHK method)")
+            debug_log(LogCategory.MINIGAME, f"Stabilizing with single quick click (AHK method)")
             
-            # Calculate number of clicks needed
-            num_clicks = max(1, int(stabilize_duration / click_interval))
-            
-            print(f"🎯 Stabilizing with {num_clicks} clicks at {1/click_interval:.1f} CPS")
-            debug_log(LogCategory.MINIGAME, f"Stabilizing with {num_clicks} clicks at {1/click_interval:.1f} CPS")
-            
-            for i in range(num_clicks):
-                try:
-                    # Use low-level Windows API only
-                    virtual_mouse.mouse_down(click_x, click_y, 'left')
-                    time.sleep(0.01)  # Very brief click
-                    virtual_mouse.mouse_up(click_x, click_y, 'left')
-                    print(f"✅ API click {i+1}/{num_clicks}")
-                    debug_log(LogCategory.MOUSE, f"API click {i+1}/{num_clicks}")
-                except Exception as e:
-                    print(f"❌ Click {i+1} failed with Windows API: {e}")
-                    debug_log(LogCategory.ERROR, f"Click {i+1} failed with Windows API: {e}")
-                    return  # Don't fallback to PyAutoGUI - avoid detection
-                
-                # Wait between clicks (but not after the last click)
-                if i < num_clicks - 1:
-                    time.sleep(click_interval - 0.01)  # Subtract click duration
+            try:
+                # AHK style: single quick click (down 10ms, up, wait 10ms)
+                virtual_mouse.mouse_down(click_x, click_y, 'left')
+                time.sleep(0.01)  # 10ms down (like AHK)
+                virtual_mouse.mouse_up(click_x, click_y, 'left')
+                time.sleep(0.01)  # 10ms pause (like AHK)
+                print(f"✅ Windows API stabilize click completed")
+                debug_log(LogCategory.MOUSE, f"Windows API stabilize click completed")
+            except Exception as e:
+                print(f"❌ Stabilize click failed with Windows API: {e}")
+                debug_log(LogCategory.ERROR, f"Stabilize click failed with Windows API: {e}")
+                return  # Don't fallback to PyAutoGUI - avoid detection
                 
         elif action_type == 1:  # Stable left tracking
             try:

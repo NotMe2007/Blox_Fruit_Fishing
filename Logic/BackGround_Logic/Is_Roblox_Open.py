@@ -805,15 +805,18 @@ def bring_roblox_to_front():
                     click_x = max(0, min(click_x, screen_width - 1))
                     click_y = max(0, min(click_y, screen_height - 1))
                     
-                    # VirtualMouse click with human-like timing
-                    duration = random.uniform(0.05, 0.15)
-                    virtual_mouse.click_at(click_x, click_y, duration=duration)
+                    # Ultra-stealth PostMessage click with human-like timing
+                    success = virtual_mouse.ultimate_stealth_click(click_x, click_y)
+                    if success:
+                        print(f"🛡️ [ULTRA-STEALTH] PostMessage validation click at ({click_x}, {click_y})")
+                    else:
+                        print(f"🛡️ [ULTRA-STEALTH] Enhanced validation click at ({click_x}, {click_y})")
                     time.sleep(random.uniform(0.2, 0.4))
                     
                     # Check if successful by seeing if window is now foreground
                     foreground_hwnd = win32gui.GetForegroundWindow()
                     if foreground_hwnd == hwnd:
-                        print("✅ Roblox focused successfully via VirtualMouse (undetectable)")
+                        print("✅ Roblox focused successfully via ultra-stealth (undetectable)")
                         return True
                         
         except Exception as click_error:
@@ -840,18 +843,21 @@ def bring_roblox_to_front():
         
         if not success:
             try:
-                # Method 3: Try VirtualMouse if available
-                from . import VirtualMouse
-                if hasattr(VirtualMouse, 'virtual_mouse'):
-                    virtual_mouse = VirtualMouse.virtual_mouse
-                    rect = win32gui.GetWindowRect(hwnd)
-                    center_x = (rect[0] + rect[2]) // 2
-                    center_y = (rect[1] + rect[3]) // 2
-                    
-                    # Click on window center to focus it
-                    virtual_mouse.click_at(center_x, center_y)
-                    time.sleep(0.5)
-                    success = True
+                # Method 3: Try ultra-stealth VirtualMouse if available
+                from . import Virtual_Mouse
+                virtual_mouse = Virtual_Mouse.VirtualMouse()
+                rect = win32gui.GetWindowRect(hwnd)
+                center_x = (rect[0] + rect[2]) // 2
+                center_y = (rect[1] + rect[3]) // 2
+                
+                # Ultra-stealth click on window center to focus it
+                success = virtual_mouse.ultimate_stealth_click(center_x, center_y)
+                if success:
+                    print(f"🛡️ [ULTRA-STEALTH] PostMessage center focus at ({center_x}, {center_y})")
+                else:
+                    print(f"🛡️ [ULTRA-STEALTH] Enhanced center focus at ({center_x}, {center_y})")
+                time.sleep(0.5)
+                success = True
             except Exception as e:
                 pass
         

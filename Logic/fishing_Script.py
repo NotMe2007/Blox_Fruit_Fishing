@@ -774,10 +774,10 @@ def _detect_fish_enhanced(region):
 def Fish_On_Hook(x, y, duration=0.011):
     """Detect the fish-on-hook indicator using improved template matching.
     
-    Updated to use the AI-processed Fish_On_Hook.png template with background removed.
-    This provides much more reliable detection than color-based exclamation mark detection.
+    IMPORTANT: This function now ONLY detects fish - it does NOT start minigame clicks.
+    Minigame clicks are handled separately by _start_minigame_clicks() for better control.
 
-    Returns True when fish detected and minigame started, False otherwise.
+    Returns True when fish detected, False otherwise.
     """
     # Validate Roblox before checking for fish
     if not (ISROBLOX_OPEN_AVAILABLE and IsRobloxOpen and IsRobloxOpen.validate_roblox_and_game()):
@@ -810,67 +810,136 @@ def Fish_On_Hook(x, y, duration=0.011):
         elif method in ["template", "shape"]:
             print("✅ RELIABLE: Shape/template detection used - event island resistant")
 
-    if found:
-        # Get click position - ONLY use Roblox window center
-        if not WINDOW_MANAGER_AVAILABLE:
-            print("ERROR: Window manager not available - cannot start minigame!")
+    # CRITICAL CHANGE: Only return detection result, don't start minigame
+    # Minigame clicking is now handled separately for better verification
+    return found
+
+def _verify_fish_on_hook_template():
+    """
+    Additional verification using strict template matching to reduce false positives.
+    This function specifically looks for the Fish_On_Hook template with high confidence.
+    
+    Returns True only if there's a high-confidence template match.
+    """
+    try:
+        # Same detection region as main Fish_On_Hook function
+        fish_region_left = 600
+        fish_region_top = 180
+        fish_region_right = 1300
+        fish_region_bottom = 450
+        fish_region_width = fish_region_right - fish_region_left
+        fish_region_height = fish_region_bottom - fish_region_top
+        
+        region = (fish_region_left, fish_region_top, fish_region_width, fish_region_height)
+        
+        # Use template detection with HIGH threshold only
+        found, confidence = _detect_fish_on_hook_template(region)
+        
+        print(f"🔍 Template verification: found={found}, confidence={confidence:.3f}")
+        
+        # Require HIGH confidence (0.75+) for verification
+        if found and confidence >= 0.75:
+            print(f"✅ High-confidence template verification passed!")
+            return True
+        else:
+            print(f"❌ Template verification failed - confidence too low")
             return False
             
+    except Exception as e:
+        print(f"❌ Template verification error: {e}")
+        return False
+
+def _start_minigame_clicks():
+    """
+    Start the minigame by performing the required clicks with enhanced AHK-style focus.
+    This replaces the clicking logic that was built into Fish_On_Hook.
+    
+    Based on Reddit post insights: Proper window focus before clicks is CRITICAL for Roblox.
+    
+    Returns True if clicks were performed successfully.
+    """
+    try:
+        # CRITICAL: Enhanced window focus using AHK-style methods (Reddit solution)
+        print("🎯 [AHK-STYLE] Ensuring aggressive window focus before minigame clicks...")
+        if not (WINDOW_MANAGER_AVAILABLE and ensure_roblox_focused()):
+            print("❌ Critical: Cannot ensure window focus - minigame may fail!")
+            return False
+        
+        # Get click position - ONLY use Roblox window center
         click_x, click_y = get_roblox_coordinates()
         if click_x is None or click_y is None:
             print("ERROR: Cannot get Roblox coordinates for minigame click!")
             return False
         
-        print(f"Using Roblox center ({click_x}, {click_y}) for minigame click")
+        print(f"🎯 Starting minigame clicks at Roblox center ({click_x}, {click_y})")
         
-        # Use virtual mouse for minigame start if available
+        # Use virtual mouse for minigame start if available (with ultimate stealth)
         if VIRTUAL_MOUSE_AVAILABLE and virtual_mouse is not None:
-            print(f"🖱️ Virtual mouse starting minigame at ({click_x}, {click_y})")
+            print(f"�️ [ULTRA-STEALTH] PostMessage stealth clicking at ({click_x}, {click_y})")
             
-            # First click (instant - no delays needed with virtual mouse)
-            virtual_mouse.click_at(click_x, click_y)
-            print("✅ Virtual mouse first click completed")
-            success1 = True
+            # First click using ultimate stealth method (PostMessage if possible)
+            click_success1 = virtual_mouse.ultimate_stealth_click(click_x, click_y)
+            if click_success1:
+                print("🛡️ [ULTRA-STEALTH] PostMessage first click completed")
+            else:
+                print("🛡️ [ULTRA-STEALTH] Enhanced first click completed")
             
-            # Brief delay between clicks
+            # Brief delay between clicks for Roblox processing
             time.sleep(0.1)
             
-            # Second click to ensure minigame starts
-            virtual_mouse.click_at(click_x, click_y)
-            print("✅ Virtual mouse second click completed")
-            success2 = True
-            
-            if success1 and success2:
-                print("Virtual mouse minigame clicks completed!")
+            # Second click to ensure minigame starts (with stealth re-verification)
+            click_success2 = virtual_mouse.ultimate_stealth_click(click_x, click_y)
+            if click_success2:
+                print("🛡️ [ULTRA-STEALTH] PostMessage second click completed")
             else:
-                print("Some virtual mouse clicks failed, but continuing...")
+                print("🛡️ [ULTRA-STEALTH] Enhanced second click completed")
+            
+            print("🛡️ [ULTRA-STEALTH] PostMessage minigame clicks completed - bypassing anti-cheat!")
+            return True
                 
         else:
-            # Fallback to pyautogui
-            print("Using fallback pyautogui for minigame clicks")
-            offset_x = random.randint(-5, 5)
-            offset_y = random.randint(-5, 5)
-            final_x = click_x + offset_x
-            final_y = click_y + offset_y
+            # Fallback to Windows API for mouse input
+            print("Using Windows API fallback for minigame clicks")
+            try:
+                import ctypes
+                user32 = ctypes.windll.user32
+                
+                offset_x = random.randint(-5, 5)
+                offset_y = random.randint(-5, 5)
+                final_x = click_x + offset_x
+                final_y = click_y + offset_y
+                
+                # Move to position
+                user32.SetCursorPos(final_x, final_y)
+                time.sleep(0.05)
+                
+                # Mouse down and up (left button)
+                MOUSEEVENTF_LEFTDOWN = 0x0002
+                MOUSEEVENTF_LEFTUP = 0x0004
+                
+                # First click
+                user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+                time.sleep(0.05)
+                user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+                
+                # Brief delay between clicks
+                time.sleep(0.1)
+                
+                # Second click
+                user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+                time.sleep(0.05)
+                user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+                
+                print("🎮 Windows API minigame clicks completed!")
+                return True
+                
+            except Exception as e:
+                print(f"❌ Windows API fallback failed: {e}")
+                return False
             
-            smooth_move_to(final_x, final_y)
-            
-            # First click with minimal timing
-            pyautogui.mouseDown(final_x, final_y, button='left')
-            time.sleep(0.05)  # Minimal click duration
-            pyautogui.mouseUp(final_x, final_y, button='left')
-            
-            # Short delay between clicks for system registration
-            time.sleep(0.02)
-            
-            # Second click to ensure minigame starts
-            pyautogui.mouseDown(final_x, final_y, button='left')
-            time.sleep(0.05)  # Minimal click duration
-            pyautogui.mouseUp(final_x, final_y, button='left')
-            
-            print("Fallback minigame clicks completed!")
-        return True
-    return False
+    except Exception as e:
+        print(f"❌ Minigame click error: {e}")
+        return False
 
 
 def Shift_State(x, y, duration=0.011):
@@ -1122,21 +1191,27 @@ def Fish_Left(x, y, duration=0.011):
     # search a reasonable region (full screen for now)
     direction = _detect_fish_direction(region=None, threshold=0.84)
     if direction == 'left':
-        # Use Virtual Mouse for undetectable click
+        # Use ultra-stealth PostMessage click for undetectable input
         if VIRTUAL_MOUSE_AVAILABLE and virtual_mouse is not None:
             current_x, current_y = virtual_mouse.get_cursor_pos()
-            virtual_mouse.click_at(current_x, current_y)
+            success = virtual_mouse.ultimate_stealth_click(current_x, current_y)
+            if success:
+                debug_log(LogCategory.FISH_DETECTION, f"🛡️ [ULTRA-STEALTH] PostMessage left fish click at ({current_x}, {current_y})")
+            else:
+                debug_log(LogCategory.FISH_DETECTION, f"🛡️ [ULTRA-STEALTH] Enhanced left fish click at ({current_x}, {current_y})")
         else:
-            # Fallback: Use Windows API directly
+            # Ultra-stealth fallback: Create virtual mouse instance
             try:
-                import ctypes
-                user32 = ctypes.windll.user32
-                MOUSEEVENTF_LEFTDOWN = 0x0002
-                MOUSEEVENTF_LEFTUP = 0x0004
-                user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-                user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+                from .BackGround_Logic import Virtual_Mouse
+                fallback_mouse = Virtual_Mouse.VirtualMouse()
+                current_x, current_y = fallback_mouse.get_cursor_pos()
+                success = fallback_mouse.ultimate_stealth_click(current_x, current_y)
+                if success:
+                    debug_log(LogCategory.FISH_DETECTION, f"🛡️ [ULTRA-STEALTH] PostMessage fallback left fish click at ({current_x}, {current_y})")
+                else:
+                    debug_log(LogCategory.FISH_DETECTION, f"🛡️ [ULTRA-STEALTH] Enhanced fallback left fish click at ({current_x}, {current_y})")
             except Exception as e:
-                debug_log(LogCategory.ERROR, f"Click fallback failed: {e}")
+                debug_log(LogCategory.ERROR, f"🛡️ [ULTRA-STEALTH] Fallback click failed: {e}")
         
         time.sleep(duration)
         return True
@@ -1147,21 +1222,27 @@ def Fish_Right(x, y, duration=0.011):
     """Detect right-moving fish using Fish_Right template. Returns True when detected and clicks."""
     direction = _detect_fish_direction(region=None, threshold=0.84)
     if direction == 'right':
-        # Use Virtual Mouse for undetectable click
+        # Use ultra-stealth PostMessage click for undetectable input
         if VIRTUAL_MOUSE_AVAILABLE and virtual_mouse is not None:
             current_x, current_y = virtual_mouse.get_cursor_pos()
-            virtual_mouse.click_at(current_x, current_y)
+            success = virtual_mouse.ultimate_stealth_click(current_x, current_y)
+            if success:
+                debug_log(LogCategory.FISH_DETECTION, f"🛡️ [ULTRA-STEALTH] PostMessage right fish click at ({current_x}, {current_y})")
+            else:
+                debug_log(LogCategory.FISH_DETECTION, f"🛡️ [ULTRA-STEALTH] Enhanced right fish click at ({current_x}, {current_y})")
         else:
-            # Fallback: Use Windows API directly
+            # Ultra-stealth fallback: Create virtual mouse instance
             try:
-                import ctypes
-                user32 = ctypes.windll.user32
-                MOUSEEVENTF_LEFTDOWN = 0x0002
-                MOUSEEVENTF_LEFTUP = 0x0004
-                user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-                user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+                from .BackGround_Logic import Virtual_Mouse
+                fallback_mouse = Virtual_Mouse.VirtualMouse()
+                current_x, current_y = fallback_mouse.get_cursor_pos()
+                success = fallback_mouse.ultimate_stealth_click(current_x, current_y)
+                if success:
+                    debug_log(LogCategory.FISH_DETECTION, f"🛡️ [ULTRA-STEALTH] PostMessage fallback right fish click at ({current_x}, {current_y})")
+                else:
+                    debug_log(LogCategory.FISH_DETECTION, f"🛡️ [ULTRA-STEALTH] Enhanced fallback right fish click at ({current_x}, {current_y})")
             except Exception as e:
-                debug_log(LogCategory.ERROR, f"Click fallback failed: {e}")
+                debug_log(LogCategory.ERROR, f"🛡️ [ULTRA-STEALTH] Fallback click failed: {e}")
         
         time.sleep(duration)
         return True
@@ -1377,8 +1458,108 @@ def execute_minigame_action(decision):
         pass
 
 
+def initialize_camera_setup():
+    """
+    One-time camera setup for optimal fishing view.
+    Moves mouse to center, adjusts camera angle, and sets zoom level.
+    """
+    print("🎥 [CAMERA SETUP] Initializing optimal fishing camera view...")
+    
+    # Ensure we have virtual mouse available
+    if not VIRTUAL_MOUSE_AVAILABLE or virtual_mouse is None:
+        print("⚠️ [CAMERA SETUP] Virtual mouse not available, skipping camera setup")
+        return False
+    
+    # Get Roblox window center coordinates
+    target_x, target_y = get_roblox_coordinates()
+    if target_x is None or target_y is None:
+        print("⚠️ [CAMERA SETUP] Could not get Roblox coordinates, skipping camera setup")
+        return False
+    
+    try:
+        # Phase 1: Move to center of screen for camera adjustment
+        print("🎥 [CAMERA SETUP] Moving to screen center for camera adjustment...")
+        center_x, center_y = target_x, target_y  # Use Roblox window center
+        
+        # Natural movement to center
+        current_pos = virtual_mouse.get_cursor_pos()
+        if current_pos:
+            virtual_mouse.human_like_move(current_pos[0], current_pos[1], center_x, center_y, 
+                                        random.uniform(0.5, 0.8))
+        else:
+            virtual_mouse.move_to(center_x, center_y)
+        
+        time.sleep(random.uniform(0.3, 0.5))  # Human-like pause
+        
+        # Phase 2: Right-click and drag down for camera angle
+        print("🎥 [CAMERA SETUP] Adjusting camera angle (right-click drag)...")
+        
+        # Calculate drag end position (600 pixels down)
+        drag_end_x = center_x + random.randint(-20, 20)  # Slight horizontal variation
+        drag_end_y = center_y + 600 + random.randint(-30, 30)  # 600 pixels down with variation
+        
+        # Ensure end position is valid
+        if WINDOW_MANAGER_AVAILABLE:
+            roblox_region = get_roblox_window_region()
+            if roblox_region:
+                max_y = roblox_region[1] + roblox_region[3] - 50  # Window bottom minus margin
+                drag_end_y = min(drag_end_y, max_y)
+        
+        # Enhanced right-click drag for camera adjustment
+        print(f"🎥 [CAMERA SETUP] Dragging from ({center_x}, {center_y}) to ({drag_end_x}, {drag_end_y})")
+        
+        # Right mouse down
+        virtual_mouse.mouse_down(center_x, center_y, 'right')
+        time.sleep(random.uniform(0.1, 0.2))  # Brief hold before drag
+        
+        # Smooth drag movement
+        virtual_mouse.human_like_move(center_x, center_y, drag_end_x, drag_end_y, 
+                                    random.uniform(0.8, 1.2))
+        
+        # Right mouse up
+        virtual_mouse.mouse_up(drag_end_x, drag_end_y, 'right')
+        time.sleep(random.uniform(0.5, 0.8))  # Pause after camera adjustment
+        
+        # Phase 3: Zoom in with 'I' key (45 times at 0.01s intervals)
+        print("🎥 [CAMERA SETUP] Zooming in (pressing 'I' 45 times)...")
+        
+        if VIRTUAL_KEYBOARD_AVAILABLE and virtual_keyboard is not None:
+            for i in range(45):
+                virtual_keyboard.key_press('i', duration=0.005)  # Very short press duration
+                time.sleep(0.01)  # Exact 0.01s interval as requested
+                if i % 15 == 0:  # Progress indicator every 15 presses
+                    print(f"🎥 [CAMERA SETUP] Zoom progress: {i+1}/45")
+        else:
+            print("⚠️ [CAMERA SETUP] Virtual keyboard not available, skipping zoom in")
+        
+        time.sleep(random.uniform(0.3, 0.5))  # Pause between zoom in and out
+        
+        # Phase 4: Zoom out with 'O' key (3 times)
+        print("🎥 [CAMERA SETUP] Fine-tuning zoom (pressing 'O' 3 times)...")
+        
+        if VIRTUAL_KEYBOARD_AVAILABLE and virtual_keyboard is not None:
+            for i in range(3):
+                virtual_keyboard.key_press('o', duration=0.05)  # Normal press duration
+                time.sleep(random.uniform(0.15, 0.25))  # Slightly longer interval for zoom out
+        else:
+            print("⚠️ [CAMERA SETUP] Virtual keyboard not available, skipping zoom out")
+        
+        time.sleep(random.uniform(0.5, 1.0))  # Final pause
+        
+        print("✅ [CAMERA SETUP] Camera initialization completed successfully!")
+        return True
+        
+    except Exception as e:
+        print(f"❌ [CAMERA SETUP] Camera setup failed: {e}")
+        return False
+
+
+# Camera initialization flag - ensures camera setup only runs once per script session
+camera_initialized = False
+
 def main_fishing_loop():
     """Main fishing automation loop."""
+    global camera_initialized  # Use the module-level flag
     
     # Check that required modules are available
     if not FISHING_ROD_DETECTOR_AVAILABLE or FishingRodDetector is None:
@@ -1415,9 +1596,25 @@ def main_fishing_loop():
             # AHK pixel scaling: PixelScaling = 1034/(FishBarRight-FishBarLeft)
             minigame_config.pixel_scaling = 1034 / fish_bar_width
             
-            # Set boundaries based on window dimensions
-            minigame_config.max_left_bar = 0.15   # 15% from left edge
-            minigame_config.max_right_bar = 0.85  # 85% from left edge (15% from right)
+            # Adjusted boundaries for middle-focused gameplay (fish rarely goes to corners)
+            minigame_config.max_left_bar = 0.10   # 10% from left edge (less restrictive)
+            minigame_config.max_right_bar = 0.90  # 90% from left edge (10% from right)
+            
+            # Middle-focused gameplay adjustments
+            minigame_config.deadzone = 0.03       # Smaller deadzone for more responsive middle tracking
+            minigame_config.deadzone2 = 0.12      # Adjusted for better middle-area stable tracking
+            
+            # Enhanced middle-area tracking parameters
+            minigame_config.stable_left_multiplier = 1.4    # Slightly more responsive left tracking
+            minigame_config.stable_right_multiplier = 2.1   # Balanced right tracking for middle play
+            minigame_config.stable_left_division = 1.2      # Fine-tuned for smoother middle tracking
+            minigame_config.stable_right_division = 1.4     # Optimized for middle-area responsiveness
+            
+            # Reduced unstable action intensity for middle-focused gameplay
+            minigame_config.unstable_left_multiplier = 1.8   # Less aggressive (was 2.19)
+            minigame_config.unstable_right_multiplier = 2.2  # Less aggressive (was 2.665)
+            minigame_config.unstable_left_division = 1.1     # Smoother unstable left
+            minigame_config.unstable_right_division = 1.3    # Smoother unstable right
             
             pass
         else:
@@ -1441,9 +1638,30 @@ def main_fishing_loop():
     
     try:
         while True:
+            # Camera Setup - Run once at the beginning when Roblox is confirmed active
+            if not camera_initialized:
+                # First validate that Roblox is active before camera setup
+                if ISROBLOX_OPEN_AVAILABLE and IsRobloxOpen and IsRobloxOpen.validate_roblox_and_game():
+                    print("🎮 Roblox confirmed active - starting one-time camera setup...")
+                    camera_setup_success = initialize_camera_setup()
+                    camera_initialized = True  # Mark as initialized regardless of success to prevent spam
+                    
+                    if camera_setup_success:
+                        print("✅ Camera setup completed - beginning fishing automation...")
+                    else:
+                        print("⚠️ Camera setup had issues - continuing with fishing anyway...")
+                    
+                    time.sleep(1.0)  # Brief pause before starting main fishing logic
+                else:
+                    print("🔄 Waiting for Roblox to be active for camera setup...")
+                    time.sleep(2.0)
+                    continue
+            
             # Validate Roblox periodically (not every loop to reduce debug spam)
+            # Skip validation during minigame to prevent interruptions
             current_time = time.time()
-            if current_time - last_validation_time > validation_interval:
+            if (current_time - last_validation_time > validation_interval and 
+                fishing_state != "minigame"):  # Don't interrupt minigame with validation
                 if not (ISROBLOX_OPEN_AVAILABLE and IsRobloxOpen and IsRobloxOpen.validate_roblox_and_game()):
                     # Use gentle focus approach to avoid Roblox anti-cheat detection
                     focus_result = ISROBLOX_OPEN_AVAILABLE and IsRobloxOpen and IsRobloxOpen.bring_roblox_to_front()
@@ -1627,17 +1845,32 @@ def main_fishing_loop():
                     continue
                 
 
-                # Check for fish on hook
-                hook_result = Fish_On_Hook(0, 0)  # Coordinates not used in current implementation
+                # Check for fish on hook with enhanced verification
+                fish_detected = Fish_On_Hook(0, 0)  # This now only detects, doesn't click
                 
-
-                if hook_result:
-                    print(f"🐟 FISH ON HOOK DETECTED! Clicking and waiting for minigame...")
-                    # Wait for minigame UI to load after fish click (Fish_On_Hook already clicked)
-                    time.sleep(1.0)  # Wait 1 second for minigame to fully appear
-                    print(f"🎮 Starting minigame detection...")
-                    fishing_state = "minigame"
-                    minigame_start_time = time.time()
+                if fish_detected:
+                    print(f"🐟 FISH DETECTED! Verifying with template matching...")
+                    # Additional verification using strict template matching
+                    time.sleep(0.2)  # Brief pause for stability
+                    
+                    # Double-check with template matching to avoid false positives
+                    verification_passed = _verify_fish_on_hook_template()
+                    
+                    if verification_passed:
+                        print(f"✅ FISH VERIFIED! Starting minigame...")
+                        # Start the minigame manually with proper clicking
+                        minigame_started = _start_minigame_clicks()
+                        
+                        if minigame_started:
+                            print(f"🎮 Minigame started successfully!")
+                            time.sleep(1.0)  # Wait for minigame UI to load
+                            fishing_state = "minigame"
+                            minigame_start_time = time.time()
+                        else:
+                            print(f"❌ Failed to start minigame, continuing to wait...")
+                    else:
+                        print(f"⚠️ Fish detection not verified by template matching - likely false positive")
+                        # Continue waiting instead of starting minigame
                 else:
                     # Show progress every 5 seconds
                     if int(current_time) % 5 == 0 and abs(current_time - int(current_time)) < 0.1:
@@ -1665,7 +1898,17 @@ def main_fishing_loop():
                     print("ERROR: FishingMiniGame not available")
                     minigame_result = True  # End minigame
                 
-                if minigame_result or (time.time() - minigame_start_time) > 15:  # 15 second timeout
+                # Debug: Show exactly why minigame is ending
+                current_time = time.time()
+                minigame_duration = current_time - minigame_start_time
+                timeout_reached = minigame_duration > 45  # Extended to 45 seconds for complex fishing sequences
+                
+                if minigame_result:
+                    print(f"🔍 [DEBUG] Minigame ending due to handler returning True (duration: {minigame_duration:.1f}s)")
+                elif timeout_reached:
+                    print(f"🔍 [DEBUG] Minigame ending due to 45s timeout (duration: {minigame_duration:.1f}s)")
+                
+                if minigame_result or timeout_reached:
                     print("Minigame done! Fishing cycle complete, resetting...")
                     fishing_state = "waiting"
                     cast_attempts = 0

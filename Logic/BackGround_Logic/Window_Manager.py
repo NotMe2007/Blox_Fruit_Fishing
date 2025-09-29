@@ -183,13 +183,22 @@ class RobloxWindowManager:
             return False
     
     def bring_to_front(self):
-        """Bring the Roblox window to front using human-like methods to avoid detection."""
+        """
+        Enhanced window focus method using multiple techniques including AHK-style focus.
+        Based on Reddit post: AHK window.focus() solved Roblox automation detection.
+        """
         if not self.is_window_valid():
             if not self.find_roblox_window():
                 return False
         
         try:
-            # Method 1: VirtualMouse gentle click (most undetectable)
+            # Method 1: AHK-style aggressive window focus (CRITICAL for Roblox automation)
+            debug_log(LogCategory.WINDOW_MANAGEMENT, "🎯 Attempting AHK-style aggressive window focus...")
+            if self._ahk_style_focus():
+                debug_log(LogCategory.WINDOW_MANAGEMENT, "✅ AHK-style focus successful!")
+                return True
+            
+            # Method 2: VirtualMouse gentle click (most undetectable)
             if self.virtual_mouse:
                 debug_log(LogCategory.WINDOW_MANAGEMENT, "Attempting gentle focus via VirtualMouse...")
                 center_x, center_y = self.get_window_center()
@@ -206,23 +215,131 @@ class RobloxWindowManager:
                     click_x = max(0, min(center_x + offset_x, screen_width - 1))
                     click_y = max(0, min(center_y + offset_y, screen_height - 1))
                     
-                    # VirtualMouse click with human-like timing
-                    duration = random.uniform(0.05, 0.15)
-                    self.virtual_mouse.click_at(click_x, click_y, duration=duration)
+                    # Ultra-stealth PostMessage click with human-like timing
+                    success = self.virtual_mouse.ultimate_stealth_click(click_x, click_y)
+                    if success:
+                        debug_log(LogCategory.WINDOW_MANAGEMENT, f"🛡️ [ULTRA-STEALTH] PostMessage focus click at ({click_x}, {click_y})")
+                    else:
+                        debug_log(LogCategory.WINDOW_MANAGEMENT, f"🛡️ [ULTRA-STEALTH] Enhanced focus click at ({click_x}, {click_y})")
                     time.sleep(random.uniform(0.2, 0.4))
                     
                     # Check if successful
                     if self.is_roblox_focused():
-                        debug_log(LogCategory.WINDOW_MANAGEMENT, "✅ Roblox focused via VirtualMouse click")
+                        debug_log(LogCategory.WINDOW_MANAGEMENT, "✅ Roblox focused via ultra-stealth click")
                         return True
             
-            # Method 2: Alt-Tab simulation (keyboard-based, less detectable)
+            # Method 3: Alt-Tab simulation (keyboard-based, less detectable)
             debug_log(LogCategory.WINDOW_MANAGEMENT, "Attempting focus via Alt-Tab simulation...")
             return self._alt_tab_to_roblox()
             
         except Exception as e:
             debug_log(LogCategory.ERROR, f"Failed to bring Roblox to front: {e}")
             return False
+
+    def _ahk_style_focus(self):
+        """
+        AHK-style window focus that bypasses Roblox automation detection.
+        
+        This implements the same window focus method that AHK uses which the Reddit user
+        found was critical for making automation work in Roblox.
+        """
+        try:
+            import ctypes
+            from ctypes import wintypes
+            
+            user32 = ctypes.windll.user32
+            kernel32 = ctypes.windll.kernel32
+            
+            # Get current thread and target window thread
+            current_thread = kernel32.GetCurrentThreadId()
+            target_thread = user32.GetWindowThreadProcessId(self.roblox_hwnd, None)
+            
+            debug_log(LogCategory.WINDOW_MANAGEMENT, f"🔧 Current thread: {current_thread}, Target thread: {target_thread}")
+            
+            # Step 1: Attach to target thread input (critical for Roblox)
+            if target_thread != current_thread:
+                attach_result = user32.AttachThreadInput(current_thread, target_thread, True)
+                debug_log(LogCategory.WINDOW_MANAGEMENT, f"🔗 Thread attach result: {attach_result}")
+            
+            # Step 2: Multiple focus attempts with different methods
+            focus_success = False
+            
+            # Method A: Smart ShowWindow + SetForegroundWindow (AHK standard but improved)
+            # Check if window is minimized before restoring to avoid unwanted resizing
+            placement = win32gui.GetWindowPlacement(self.roblox_hwnd)
+            window_state = placement[1]  # SW_HIDE=0, SW_NORMAL=1, SW_MINIMIZED=2, SW_MAXIMIZED=3
+            
+            debug_log(LogCategory.WINDOW_MANAGEMENT, f"🔍 Current window state: {window_state}")
+            
+            # Only restore if window is actually minimized (state 2)
+            if window_state == 2:  # SW_MINIMIZED
+                debug_log(LogCategory.WINDOW_MANAGEMENT, "📏 Window is minimized - restoring...")
+                user32.ShowWindow(self.roblox_hwnd, win32con.SW_RESTORE)
+                time.sleep(0.1)  # Give time for restore animation
+            else:
+                debug_log(LogCategory.WINDOW_MANAGEMENT, "✅ Window already visible - skipping restore")
+            
+            foreground_result = user32.SetForegroundWindow(self.roblox_hwnd)
+            debug_log(LogCategory.WINDOW_MANAGEMENT, f"🎯 SetForegroundWindow result: {foreground_result}")
+            
+            if foreground_result:
+                focus_success = True
+            
+            # Method B: BringWindowToTop (gentle - no size changes)
+            user32.BringWindowToTop(self.roblox_hwnd)
+            time.sleep(0.05)
+            
+            # Method C: SetActiveWindow (for input focus)
+            user32.SetActiveWindow(self.roblox_hwnd)
+            time.sleep(0.05)
+            
+            # Method D: SetFocus (final input ensure)
+            user32.SetFocus(self.roblox_hwnd)
+            time.sleep(0.1)
+            
+            # Step 3: Detach thread input
+            if target_thread != current_thread:
+                user32.AttachThreadInput(current_thread, target_thread, False)
+                debug_log(LogCategory.WINDOW_MANAGEMENT, "🔓 Thread detached")
+            
+            # Step 4: Verify focus success
+            verification_success = self.is_roblox_focused()
+            debug_log(LogCategory.WINDOW_MANAGEMENT, f"🔍 Focus verification: {verification_success}")
+            
+            # Step 5: Additional input state reset (critical for automation)
+            if verification_success:
+                self._reset_input_state()
+            
+            return verification_success
+            
+        except Exception as e:
+            debug_log(LogCategory.ERROR, f"❌ AHK-style focus failed: {e}")
+            return False
+    
+    def _reset_input_state(self):
+        """
+        Reset input state after focus - critical for Roblox automation.
+        This ensures that subsequent mouse/keyboard input is properly recognized.
+        """
+        try:
+            import ctypes
+            user32 = ctypes.windll.user32
+            
+            # Reset key states (prevent stuck keys)
+            for vk_code in [0x01, 0x02, 0x04]:  # Left, Right, Middle mouse buttons
+                user32.keybd_event(vk_code, 0, 0x0002, 0)  # Key up event
+            
+            # Short delay for state reset
+            time.sleep(0.1)
+            
+            # Reset cursor position slightly to "wake up" input system
+            current_pos = win32gui.GetCursorPos()
+            user32.SetCursorPos(current_pos[0], current_pos[1])
+            
+            debug_log(LogCategory.WINDOW_MANAGEMENT, "🔄 Input state reset completed")
+            
+        except Exception as e:
+            debug_log(LogCategory.ERROR, f"Input state reset failed: {e}")
     
     def _alt_tab_to_roblox(self):
         """Use Alt-Tab behavior to find and focus Roblox window."""
@@ -281,6 +398,12 @@ class RobloxWindowManager:
             return foreground_hwnd == self.roblox_hwnd
         except Exception:
             return False
+    
+    def get_roblox_hwnd(self):
+        """Get the Roblox window handle for stealth clicking operations."""
+        if self.roblox_hwnd and self.is_window_valid():
+            return self.roblox_hwnd
+        return None
 
 
 # Global instance
@@ -302,3 +425,8 @@ def ensure_roblox_focused():
     if not roblox_window_manager.is_roblox_focused():
         return roblox_window_manager.bring_to_front()
     return True
+
+
+def get_roblox_hwnd():
+    """Get Roblox window handle for stealth clicking."""
+    return roblox_window_manager.get_roblox_hwnd()
