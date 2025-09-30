@@ -1,0 +1,19 @@
+{
+    "control_value": 0.0,
+    "fish_bar_tolerance": 5.0,
+    "white_bar_tolerance": 15.0,
+    "arrow_tolerance": 6.0,
+    "scan_delay": 10.0,
+    "side_bar_ratio": 0.7,
+    "side_bar_delay": 400.0,
+    "stable_right_multiplier": 2.36,
+    "stable_right_division": 1.55,
+    "stable_left_multiplier": 1.211,
+    "stable_left_division": 1.12,
+    "unstable_right_multiplier": 2.665,
+    "unstable_right_division": 1.5,
+    "unstable_left_multiplier": 2.19,
+    "unstable_left_division": 1.0,
+    "right_ankle_break_multiplier": 0.75,
+    "left_ankle_break_multiplier": 0.45
+}
