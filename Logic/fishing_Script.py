@@ -13,71 +13,19 @@ from pathlib import Path
 current_dir = Path(__file__).parent
 sys.path.insert(0, str(current_dir))
 
-# Debug Logger
-try:
-    from BackGround_Logic.Debug_Logger import debug_log, LogCategory
-    DEBUG_LOGGER_AVAILABLE = True
-except ImportError:
-    DEBUG_LOGGER_AVAILABLE = False
-    # Fallback log categories
-    from enum import Enum
-    class LogCategory(Enum):
-        FISH_DETECTION = "FISH_DETECTION"
-        FISHING_MAIN = "FISHING_MAIN"
-        MINIGAME_ACTIONS = "MINIGAME_ACTIONS"
-        SYSTEM = "SYSTEM"
-        ERROR = "ERROR"
-    def debug_log(category, message):
-        print(f"[{category.value}] {message}")
-
-# Import virtual mouse driver
-virtual_mouse = None
-VIRTUAL_MOUSE_AVAILABLE = False
-
-try:
-    from BackGround_Logic.Virtual_Mouse import VirtualMouse
-    virtual_mouse = VirtualMouse()
-    VIRTUAL_MOUSE_AVAILABLE = True
-except ImportError as e:
-    virtual_mouse = None
-    VIRTUAL_MOUSE_AVAILABLE = False
-
-# Import virtual keyboard driver
-virtual_keyboard = None
-VIRTUAL_KEYBOARD_AVAILABLE = False
-
-try:
-    from BackGround_Logic.Virtual_Keyboard import VirtualKeyboard
-    virtual_keyboard = VirtualKeyboard()
-    VIRTUAL_KEYBOARD_AVAILABLE = True
-except ImportError as e:
-    virtual_keyboard = None
-    VIRTUAL_KEYBOARD_AVAILABLE = False
-
-# Import screen capture utility (replacement for pyautogui.screenshot)
-screen_capture = None
-SCREEN_CAPTURE_AVAILABLE = False
-
-try:
-    from BackGround_Logic.Screen_Capture import screenshot
-    SCREEN_CAPTURE_AVAILABLE = True
-except ImportError as e:
-    SCREEN_CAPTURE_AVAILABLE = False
-    screenshot = None
-
-# Import window manager for proper Roblox window handling
-try:
-    from BackGround_Logic.Window_Manager import roblox_window_manager, get_roblox_coordinates, get_roblox_window_region, ensure_roblox_focused # type: ignore
-    WINDOW_MANAGER_AVAILABLE = True
-except ImportError as e:
-    WINDOW_MANAGER_AVAILABLE = False
-    # Define dummy functions for fallback
-    def get_roblox_coordinates():
-        return None, None
-    def get_roblox_window_region():
-        return None
-    def ensure_roblox_focused():
-        return False
+# Import all common dependencies from centralized Import_Utils
+from BackGround_Logic.Import_Utils import (
+    debug_log, LogCategory, DEBUG_LOGGER_AVAILABLE,
+    virtual_mouse, VIRTUAL_MOUSE_AVAILABLE,
+    is_virtual_mouse_available,
+    virtual_keyboard, VIRTUAL_KEYBOARD_AVAILABLE,
+    is_virtual_keyboard_available,
+    screenshot, SCREEN_CAPTURE_AVAILABLE,
+    is_screen_capture_available,
+    roblox_window_manager, get_roblox_coordinates, 
+    get_roblox_window_region, ensure_roblox_focused, 
+    WINDOW_MANAGER_AVAILABLE, is_window_manager_available
+)
 
 # Import fishing rod detector functions
 try:
@@ -112,8 +60,16 @@ try:
     ENHANCED_FISH_DETECTOR_AVAILABLE = True
 except ImportError as e:
     ENHANCED_FISH_DETECTOR_AVAILABLE = False
-    EnhancedFishDetector = None
+    EnhancedFishDetector = None  # type: ignore
     debug_log(LogCategory.SYSTEM, f"Warning: Enhanced Fish Detector not available: {e}")
+
+# Import pyautogui for fallback mouse control (detection risk - use Virtual_Mouse instead)
+try:
+    import pyautogui
+    PYAUTOGUI_AVAILABLE = True
+except ImportError:
+    PYAUTOGUI_AVAILABLE = False
+    pyautogui = None  # type: ignore
 
 
 def smooth_move_to(target_x, target_y, duration=None):
@@ -122,7 +78,7 @@ def smooth_move_to(target_x, target_y, duration=None):
     Falls back to manual cursor positioning if Virtual Mouse unavailable.
     """
     # If virtual mouse is available, use it (undetected)
-    if VIRTUAL_MOUSE_AVAILABLE and virtual_mouse is not None:
+    if is_virtual_mouse_available():
         try:
             virtual_mouse.move_to(target_x, target_y)
             return
@@ -174,7 +130,7 @@ def fallback_key_press(key_code):
 
 def get_mouse_position():
     """Get current mouse position using Virtual Mouse or Windows API fallback."""
-    if VIRTUAL_MOUSE_AVAILABLE and virtual_mouse is not None:
+    if is_virtual_mouse_available():
         try:
             return virtual_mouse.get_cursor_pos()
         except Exception:
@@ -233,7 +189,7 @@ def CastFishingRod(x, y, hold_seconds=0.93):
     actual_hold = hold_seconds + random.uniform(-0.1, 0.1)
     
     # Use virtual mouse for casting if available
-    if VIRTUAL_MOUSE_AVAILABLE and virtual_mouse is not None:
+    if is_virtual_mouse_available():
         print("🛡️ [ULTRA-STEALTH] Using enhanced hardware-level casting")
         
         # Enhanced anti-detection: Larger random offset range
@@ -874,7 +830,7 @@ def _start_minigame_clicks():
         print(f"🎯 Starting minigame clicks at Roblox center ({click_x}, {click_y})")
         
         # Use virtual mouse for minigame start if available (with ultimate stealth)
-        if VIRTUAL_MOUSE_AVAILABLE and virtual_mouse is not None:
+        if is_virtual_mouse_available():
             print(f"�️ [ULTRA-STEALTH] PostMessage stealth clicking at ({click_x}, {click_y})")
             
             # First click using ultimate stealth method (PostMessage if possible)
@@ -1027,9 +983,9 @@ except Exception:
 
 # Initialize enhanced fish detector for reduced false positives
 enhanced_fish_detector = None
-if ENHANCED_FISH_DETECTOR_AVAILABLE:
+if ENHANCED_FISH_DETECTOR_AVAILABLE and EnhancedFishDetector is not None:
     try:
-        enhanced_fish_detector = EnhancedFishDetector(IMAGES_DIR)
+        enhanced_fish_detector = EnhancedFishDetector(IMAGES_DIR)  # type: ignore
         print("✅ Enhanced Fish Detector initialized - reduces false positives at event islands")
     except Exception as e:
         enhanced_fish_detector = None
@@ -1192,7 +1148,7 @@ def Fish_Left(x, y, duration=0.011):
     direction = _detect_fish_direction(region=None, threshold=0.84)
     if direction == 'left':
         # Use ultra-stealth PostMessage click for undetectable input
-        if VIRTUAL_MOUSE_AVAILABLE and virtual_mouse is not None:
+        if is_virtual_mouse_available():
             current_x, current_y = virtual_mouse.get_cursor_pos()
             success = virtual_mouse.ultimate_stealth_click(current_x, current_y)
             if success:
@@ -1223,7 +1179,7 @@ def Fish_Right(x, y, duration=0.011):
     direction = _detect_fish_direction(region=None, threshold=0.84)
     if direction == 'right':
         # Use ultra-stealth PostMessage click for undetectable input
-        if VIRTUAL_MOUSE_AVAILABLE and virtual_mouse is not None:
+        if is_virtual_mouse_available():
             current_x, current_y = virtual_mouse.get_cursor_pos()
             success = virtual_mouse.ultimate_stealth_click(current_x, current_y)
             if success:
@@ -1368,7 +1324,7 @@ def execute_minigame_action(decision):
         print(f"🎮 Minigame Action {action_type}: {action} (duration: {duration_factor:.3f}s)")
         
         if action_type == 0:  # Stabilize - short click
-            if VIRTUAL_MOUSE_AVAILABLE and virtual_mouse is not None:
+            if is_virtual_mouse_available():
                 virtual_mouse.mouse_down(click_x, click_y, 'left')  # Left mouse down
                 time.sleep(0.01)  # 10ms click
                 virtual_mouse.mouse_up(click_x, click_y, 'left')    # Left mouse up
@@ -1391,64 +1347,64 @@ def execute_minigame_action(decision):
                     debug_log(LogCategory.ERROR, f"Mouse operation failed: {e}")
                 
         elif action_type == 1:  # Stable left tracking
-            if VIRTUAL_MOUSE_AVAILABLE and virtual_mouse is not None:
+            if is_virtual_mouse_available():
                 virtual_mouse.mouse_up(click_x, click_y, 'left')    # Ensure mouse up first
                 time.sleep(duration_factor)      # Wait duration
                 virtual_mouse.mouse_down(click_x, click_y, 'left')  # Mouse down for counter-strafe
                 time.sleep(counter_strafe)       # Counter-strafe duration
-            else:
+            elif PYAUTOGUI_AVAILABLE and pyautogui is not None:
                 pyautogui.mouseUp(click_x, click_y, button='left')
                 time.sleep(duration_factor)
                 pyautogui.mouseDown(click_x, click_y, button='left')
                 time.sleep(counter_strafe)
                 
         elif action_type == 2:  # Stable right tracking  
-            if VIRTUAL_MOUSE_AVAILABLE and virtual_mouse is not None:
+            if is_virtual_mouse_available():
                 virtual_mouse.mouse_down(click_x, click_y, 'left')  # Mouse down first
                 time.sleep(duration_factor)      # Wait duration
                 virtual_mouse.mouse_up(click_x, click_y, 'left')    # Mouse up for counter-strafe
                 time.sleep(counter_strafe)       # Counter-strafe duration
-            else:
+            elif PYAUTOGUI_AVAILABLE and pyautogui is not None:
                 pyautogui.mouseDown(click_x, click_y, button='left')
                 time.sleep(duration_factor)
                 pyautogui.mouseUp(click_x, click_y, button='left')
                 time.sleep(counter_strafe)
                 
         elif action_type == 3:  # Max left boundary
-            if VIRTUAL_MOUSE_AVAILABLE and virtual_mouse is not None:
+            if is_virtual_mouse_available():
                 virtual_mouse.mouse_up(click_x, click_y, 'left')    # Force mouse up (move left)
                 time.sleep(duration_factor)      # Side delay
-            else:
+            elif PYAUTOGUI_AVAILABLE and pyautogui is not None:
                 pyautogui.mouseUp(click_x, click_y, button='left')
                 time.sleep(duration_factor)
                 
         elif action_type == 4:  # Max right boundary
-            if VIRTUAL_MOUSE_AVAILABLE and virtual_mouse is not None:
+            if is_virtual_mouse_available():
                 virtual_mouse.mouse_down(click_x, click_y, 'left')  # Force mouse down (move right)
                 time.sleep(duration_factor)      # Side delay
-            else:
+            elif PYAUTOGUI_AVAILABLE and pyautogui is not None:
                 pyautogui.mouseDown(click_x, click_y, button='left')
                 time.sleep(duration_factor)
                 
         elif action_type == 5:  # Unstable left (aggressive)
-            if VIRTUAL_MOUSE_AVAILABLE and virtual_mouse is not None:
+            if is_virtual_mouse_available():
                 virtual_mouse.mouse_up(click_x, click_y, 'left')    # Mouse up first
                 time.sleep(duration_factor)      # Aggressive duration
                 virtual_mouse.mouse_down(click_x, click_y, 'left')  # Mouse down for counter-strafe
                 time.sleep(counter_strafe)       # Counter-strafe duration
-            else:
+            elif PYAUTOGUI_AVAILABLE and pyautogui is not None:
                 pyautogui.mouseUp(click_x, click_y, button='left')
                 time.sleep(duration_factor)
                 pyautogui.mouseDown(click_x, click_y, button='left') 
                 time.sleep(counter_strafe)
                 
         elif action_type == 6:  # Unstable right (aggressive)
-            if VIRTUAL_MOUSE_AVAILABLE and virtual_mouse is not None:
+            if is_virtual_mouse_available():
                 virtual_mouse.mouse_down(click_x, click_y, 'left')  # Mouse down first
                 time.sleep(duration_factor)      # Aggressive duration
                 virtual_mouse.mouse_up(click_x, click_y, 'left')    # Mouse up for counter-strafe
                 time.sleep(counter_strafe)       # Counter-strafe duration
-            else:
+            elif PYAUTOGUI_AVAILABLE and pyautogui is not None:
                 pyautogui.mouseDown(click_x, click_y, button='left')
                 time.sleep(duration_factor)
                 pyautogui.mouseUp(click_x, click_y, button='left')
@@ -1466,7 +1422,7 @@ def initialize_camera_setup():
     print("🎥 [CAMERA SETUP] Initializing optimal fishing camera view...")
     
     # Ensure we have virtual mouse available
-    if not VIRTUAL_MOUSE_AVAILABLE or virtual_mouse is None:
+    if not is_virtual_mouse_available():
         print("⚠️ [CAMERA SETUP] Virtual mouse not available, skipping camera setup")
         return False
     
@@ -1739,7 +1695,7 @@ def main_fishing_loop():
                     continue
                 
                 # Move mouse to center of Roblox window/screen
-                if VIRTUAL_MOUSE_AVAILABLE and virtual_mouse is not None:
+                if is_virtual_mouse_available():
                     virtual_mouse.move_to(center_x, center_y)
                 else:
                     smooth_move_to(center_x, center_y)
@@ -1774,7 +1730,7 @@ def main_fishing_loop():
                         center_x, center_y = screen_w // 2, screen_h // 2
                     
                     # Move mouse to center before switching to casting state
-                    if VIRTUAL_MOUSE_AVAILABLE and virtual_mouse is not None:
+                    if is_virtual_mouse_available():
                         virtual_mouse.move_to(center_x, center_y)
                     else:
                         smooth_move_to(center_x, center_y)

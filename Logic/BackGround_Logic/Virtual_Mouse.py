@@ -18,24 +18,22 @@ try:
 except ImportError:
     WIN32_AVAILABLE = False
 
-# Debug Logger
+# Debug Logger - Import from centralized Import_Utils
 try:
-    from .Debug_Logger import debug_log, LogCategory
-    DEBUG_LOGGER_AVAILABLE = True
+    from .Import_Utils import debug_log, LogCategory, DEBUG_LOGGER_AVAILABLE  # type: ignore
 except ImportError:
     try:
-        from Debug_Logger import debug_log, LogCategory
-        DEBUG_LOGGER_AVAILABLE = True
+        from Import_Utils import debug_log, LogCategory, DEBUG_LOGGER_AVAILABLE  # type: ignore
     except ImportError:
-        DEBUG_LOGGER_AVAILABLE = False
-        # Fallback log categories
+        # Final fallback if Import_Utils not available
         from enum import Enum
-        class LogCategory(Enum):
+        class LogCategory(Enum):  # type: ignore
             MOUSE = "MOUSE"
             SYSTEM = "SYSTEM"
             ERROR = "ERROR"
-        def debug_log(category, message):
+        def debug_log(category, message):  # type: ignore
             print(f"[{category.value}] {message}")
+        DEBUG_LOGGER_AVAILABLE = False
 
 
 # Windows API constants
@@ -412,32 +410,36 @@ class VirtualMouse:
             # Convert screen coordinates to window client coordinates
             # Note: For PostMessage, we might need to adjust coordinates based on window position
             
+            if not WIN32_AVAILABLE:
+                debug_log(LogCategory.ERROR, "Win32 API not available for PostMessage clicks")
+                return
+            
             # Add human-like randomization
             jitter_x = random.randint(-2, 2)
             jitter_y = random.randint(-2, 2)
             final_x = x + jitter_x
             final_y = y + jitter_y
             
-            # Create lParam for coordinates
-            lParam = win32api.MAKELONG(final_x, final_y)
+            # Create lParam for coordinates (win32api is checked via WIN32_AVAILABLE)
+            lParam = win32api.MAKELONG(final_x, final_y)  # type: ignore
             
             if button == 'left':
                 debug_log(LogCategory.MOUSE, f"🕵️ [STEALTH-CLICK] Background left click via PostMessage")
                 # Send mouse down
-                win32gui.PostMessage(hwnd, win32con.WM_LBUTTONDOWN, win32con.MK_LBUTTON, lParam)
+                win32gui.PostMessage(hwnd, win32con.WM_LBUTTONDOWN, win32con.MK_LBUTTON, lParam)  # type: ignore
                 # Human-like click duration
                 time.sleep(random.uniform(0.03, 0.08))
                 # Send mouse up
-                win32gui.PostMessage(hwnd, win32con.WM_LBUTTONUP, 0, lParam)
+                win32gui.PostMessage(hwnd, win32con.WM_LBUTTONUP, 0, lParam)  # type: ignore
                 
             elif button == 'right':
                 debug_log(LogCategory.MOUSE, f"🕵️ [STEALTH-CLICK] Background right click via PostMessage")
                 # Send mouse down
-                win32gui.PostMessage(hwnd, win32con.WM_RBUTTONDOWN, win32con.MK_RBUTTON, lParam)
+                win32gui.PostMessage(hwnd, win32con.WM_RBUTTONDOWN, win32con.MK_RBUTTON, lParam)  # type: ignore
                 # Human-like click duration
                 time.sleep(random.uniform(0.03, 0.08))
                 # Send mouse up
-                win32gui.PostMessage(hwnd, win32con.WM_RBUTTONUP, 0, lParam)
+                win32gui.PostMessage(hwnd, win32con.WM_RBUTTONUP, 0, lParam)  # type: ignore
             else:
                 raise ValueError("Button must be 'left' or 'right'")
             

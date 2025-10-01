@@ -15,19 +15,22 @@ import numpy as np
 from pathlib import Path
 import time
 
-# Debug Logger
+# Debug Logger - Import from centralized Import_Utils
 try:
-    from .Debug_Logger import debug_log, LogCategory
+    from .Import_Utils import debug_log, LogCategory, DEBUG_LOGGER_AVAILABLE  # type: ignore
 except ImportError:
     try:
-        from Debug_Logger import debug_log, LogCategory
+        from Import_Utils import debug_log, LogCategory, DEBUG_LOGGER_AVAILABLE  # type: ignore
     except ImportError:
-        def debug_log(category, message):
-            print(f"[{category}] {message}")
-        class LogCategory:
+        # Final fallback if Import_Utils not available
+        from enum import Enum
+        class LogCategory(Enum):  # type: ignore
             FISH_DETECTION = "FISH_DETECTION"
             ERROR = "ERROR"
             SYSTEM = "SYSTEM"
+        def debug_log(category, message):  # type: ignore
+            print(f"[{category.value}] {message}")
+        DEBUG_LOGGER_AVAILABLE = False
 
 class EnhancedFishDetector:
     """Enhanced fish detector that reduces false positives from environmental colors."""

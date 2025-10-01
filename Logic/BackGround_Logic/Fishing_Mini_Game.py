@@ -23,24 +23,34 @@ from dataclasses import dataclass, field
 from typing import Optional, Tuple, Dict
 import cv2
 import numpy as np
+from PIL import Image
 # PyAutoGUI removed to avoid detection - using Windows API only
 import time
 import random
 from pathlib import Path
 
-# Import centralized debug logger
+# Import from centralized Import_Utils
 try:
-    from .Debug_Logger import debug_log, LogCategory
-    DEBUG_LOGGER_AVAILABLE = True
+    from .Import_Utils import (  # type: ignore
+        debug_log, LogCategory, DEBUG_LOGGER_AVAILABLE,
+        virtual_mouse, VIRTUAL_MOUSE_AVAILABLE, is_virtual_mouse_available,
+        roblox_window_manager, get_roblox_coordinates, ensure_roblox_focused,
+        WINDOW_MANAGER_AVAILABLE, is_window_manager_available
+    )
+    window_manager = roblox_window_manager
 except ImportError:
     try:
-        from Debug_Logger import debug_log, LogCategory
-        DEBUG_LOGGER_AVAILABLE = True
+        from Import_Utils import (  # type: ignore
+            debug_log, LogCategory, DEBUG_LOGGER_AVAILABLE,
+            virtual_mouse, VIRTUAL_MOUSE_AVAILABLE, is_virtual_mouse_available,
+            roblox_window_manager, get_roblox_coordinates, ensure_roblox_focused,
+            WINDOW_MANAGER_AVAILABLE, is_window_manager_available
+        )
+        window_manager = roblox_window_manager
     except ImportError:
-        DEBUG_LOGGER_AVAILABLE = False
-        # Fallback log categories - match Debug_Logger.py
+        # Final fallback if Import_Utils not available
         from enum import Enum
-        class LogCategory(Enum):
+        class LogCategory(Enum):  # type: ignore
             SYSTEM = "SYSTEM"
             MINIGAME = "MINIGAME"
             FISH_DETECTION = "FISH_DETECTION"
@@ -49,61 +59,24 @@ except ImportError:
             COORDINATES = "COORDS"
             MINIGAME_DETECT = "GAME_DETECT"
             ERROR = "ERROR"
-        def debug_log(category, message):
+        def debug_log(category, message):  # type: ignore
             print(f"[{category.value}] {message}")
-
-# Import virtual mouse driver
-virtual_mouse = None
-VIRTUAL_MOUSE_AVAILABLE = False
+        DEBUG_LOGGER_AVAILABLE = False
+        virtual_mouse = None  # type: ignore
+        VIRTUAL_MOUSE_AVAILABLE = False
+        def is_virtual_mouse_available():  # type: ignore
+            return False
+        window_manager = None  # type: ignore
+        WINDOW_MANAGER_AVAILABLE = False
+        def is_window_manager_available():  # type: ignore
+            return False
+        def get_roblox_coordinates():  # type: ignore
+            return None, None
+        def ensure_roblox_focused():  # type: ignore
+            return False
 
 # Minigame detection failure counter
 _minigame_detection_failures = 0
-
-try:
-    # Try relative import first (when imported as package)
-    from .Virtual_Mouse import VirtualMouse
-    virtual_mouse = VirtualMouse()
-    VIRTUAL_MOUSE_AVAILABLE = True
-except ImportError:
-    try:
-        # Add current directory to path and try absolute import
-        import sys
-        import os
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        if current_dir not in sys.path:
-            sys.path.insert(0, current_dir)
-        from Virtual_Mouse import VirtualMouse
-        virtual_mouse = VirtualMouse()
-        VIRTUAL_MOUSE_AVAILABLE = True
-    except ImportError:
-        virtual_mouse = None
-        VIRTUAL_MOUSE_AVAILABLE = False
-
-# Import window manager for proper Roblox window handling
-try:
-    # Try relative import first (when imported as package)  
-    from .Window_Manager import RobloxWindowManager, get_roblox_coordinates, ensure_roblox_focused
-    window_manager = RobloxWindowManager()
-    WINDOW_MANAGER_AVAILABLE = True
-except ImportError:
-    try:
-        # Add current directory to path and try absolute import
-        import sys
-        import os
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        if current_dir not in sys.path:
-            sys.path.insert(0, current_dir)
-        from Window_Manager import RobloxWindowManager, get_roblox_coordinates, ensure_roblox_focused
-        window_manager = RobloxWindowManager()
-        WINDOW_MANAGER_AVAILABLE = True
-    except ImportError:
-        WINDOW_MANAGER_AVAILABLE = False
-        window_manager = None
-        # Define dummy functions for fallback
-        def get_roblox_coordinates():
-            return None, None
-        def ensure_roblox_focused():
-            return False
 
 # Load minigame templates from Images directory
 IMAGES_DIR = Path(__file__).parent.parent.parent / 'Images'
@@ -487,18 +460,18 @@ def detect_minigame_elements():
         except ImportError:
             print("⚠️ win32gui not available, using cv2 screenshot fallback")
             # Fallback to cv2 if win32gui not available
-            import mss
+            import mss  # type: ignore
             with mss.mss() as sct:
                 monitor = {"top": minigame_top, "left": minigame_left, "width": minigame_width, "height": minigame_height}
-                screenshot = Image.fromarray(np.array(sct.grab(monitor))[:,:,:3])  # Remove alpha channel
+                screenshot = Image.fromarray  # type: ignore(np.array(sct.grab(monitor))[:,:,:3])  # Remove alpha channel
         except Exception as e:
             print(f"⚠️ Windows API screenshot failed: {e}")
             # Final fallback - try MSS library
             try:
-                import mss
+                import mss  # type: ignore
                 with mss.mss() as sct:
                     monitor = {"top": minigame_top, "left": minigame_left, "width": minigame_width, "height": minigame_height}
-                    screenshot = Image.fromarray(np.array(sct.grab(monitor))[:,:,:3])  # Remove alpha channel
+                    screenshot = Image.fromarray  # type: ignore(np.array(sct.grab(monitor))[:,:,:3])  # Remove alpha channel
             except ImportError:
                 print("❌ No screenshot method available - install win32gui or mss")
                 return {"minigame_active": False, "indicator_pos": 0.5, "fish_pos": 0.5}
@@ -1188,35 +1161,36 @@ def execute_minigame_action(decision):
                     
         elif action_type == 3:  # Ankle break left (release and wait)
             try:
-                # CRITICAL: Like AutoHotkey, ensure button is released and stay released
+                # CRITICAL: Like AutoHotkey, ensure button is released for the FULL duration
+                # This is the boundary correction - needs to stay released for duration_factor seconds
                 if _BUTTON_HELD:
                     virtual_mouse.mouse_up(click_x, click_y, 'left')    # Release if held
                     _BUTTON_HELD = False
-                    print(f"🔺 Windows API ankle break left - RELEASED BUTTON")
+                    print(f"🔺 Windows API ankle break left - RELEASED BUTTON for {duration_factor:.3f}s")
                 else:
-                    print(f"🔺 Windows API ankle break left - BUTTON ALREADY RELEASED")
+                    print(f"🔺 Windows API ankle break left - BUTTON ALREADY RELEASED for {duration_factor:.3f}s")
                 
-                # Small delay like AutoHotkey's ScanDelay, but keep button released
-                time.sleep(0.05)  # Short scan delay while released
-                print(f"✅ Windows API ankle break left (persistent release)")
+                # Wait for the FULL duration while released (this is critical!)
+                time.sleep(duration_factor)  # Stay released for the specified duration
+                print(f"✅ Windows API ankle break left (released for {duration_factor:.3f}s)")
             except Exception as e:
                 print(f"❌ Ankle break left failed with Windows API: {e}")
                 return
                 
         elif action_type == 4:  # Ankle break right (persistent hold)
             try:
-                # CRITICAL: Like AutoHotkey, hold down button and KEEP IT HELD
-                # Don't release until different action is needed
+                # CRITICAL: Like AutoHotkey, hold down button for the FULL duration
+                # This is the boundary correction - needs to hold for duration_factor seconds
                 if not _BUTTON_HELD:
                     virtual_mouse.mouse_down(click_x, click_y, 'left')  # Start holding
                     _BUTTON_HELD = True
-                    print(f"🔻 Windows API ankle break right - HOLDING DOWN")
+                    print(f"🔻 Windows API ankle break right - HOLDING DOWN for {duration_factor:.3f}s")
                 else:
-                    print(f"🔻 Windows API ankle break right - CONTINUING HOLD")
+                    print(f"🔻 Windows API ankle break right - CONTINUING HOLD for {duration_factor:.3f}s")
                 
-                # Small delay like AutoHotkey's ScanDelay, but keep button held
-                time.sleep(0.05)  # Short scan delay while holding
-                print(f"✅ Windows API ankle break right (persistent hold)")
+                # Wait for the FULL duration while holding (this is critical!)
+                time.sleep(duration_factor)  # Hold for the specified duration
+                print(f"✅ Windows API ankle break right (held for {duration_factor:.3f}s)")
             except Exception as e:
                 print(f"❌ Ankle break right failed with Windows API: {e}")
                 return

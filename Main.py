@@ -9,13 +9,12 @@ import tkinter.ttk as ttk
 import json
 from typing import Dict, Optional
 
-# Debug Logger
+# Debug Logger - Import from centralized Import_Utils
 try:
-    from Logic.BackGround_Logic.Debug_Logger import debug_log, LogCategory  # type: ignore
-    DEBUG_LOGGER_AVAILABLE = True
+    from Logic.BackGround_Logic.Import_Utils import debug_log, LogCategory, DEBUG_LOGGER_AVAILABLE  # type: ignore
 except ImportError:
+    # Fallback if Import_Utils not available
     DEBUG_LOGGER_AVAILABLE = False
-    # Fallback log categories
     from enum import Enum
     class LogCategory(Enum):  # type: ignore
         SYSTEM = "SYSTEM"

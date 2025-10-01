@@ -9,33 +9,22 @@ import numpy as np
 from PIL import Image
 from typing import Tuple, Optional
 
-# Debug Logger - Import with proper fallback handling
-from enum import Enum
-
-class LogCategory(Enum):
-    SYSTEM = "SYSTEM"
-    ERROR = "ERROR"
-    SCREEN_CAPTURE = "SCREEN_CAPTURE"
-
-def debug_log(category, message):
-    print(f"[{category.value}] {message}")
-
-DEBUG_LOGGER_AVAILABLE = False
-
+# Debug Logger - Import from centralized Import_Utils
 try:
-    from .Debug_Logger import debug_log as real_debug_log, LogCategory as RealLogCategory
-    debug_log = real_debug_log
-    LogCategory = RealLogCategory
-    DEBUG_LOGGER_AVAILABLE = True
+    from .Import_Utils import debug_log, LogCategory, DEBUG_LOGGER_AVAILABLE
 except ImportError:
     try:
-        from Debug_Logger import debug_log as real_debug_log, LogCategory as RealLogCategory
-        debug_log = real_debug_log
-        LogCategory = RealLogCategory
-        DEBUG_LOGGER_AVAILABLE = True
+        from Import_Utils import debug_log, LogCategory, DEBUG_LOGGER_AVAILABLE
     except ImportError:
-        # Use fallback functions defined above
-        pass
+        # Final fallback if Import_Utils not available
+        from enum import Enum
+        class LogCategory(Enum):
+            SYSTEM = "SYSTEM"
+            ERROR = "ERROR"
+            SCREEN_CAPTURE = "SCREEN_CAPTURE"
+        def debug_log(category, message):
+            print(f"[{category.value}] {message}")
+        DEBUG_LOGGER_AVAILABLE = False
 
 
 # Windows API constants

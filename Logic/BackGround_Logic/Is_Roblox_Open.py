@@ -777,17 +777,18 @@ def bring_roblox_to_front():
         # Method 1: VirtualMouse click (hardware-level, undetectable)
         try:
             # Import VirtualMouse
+            VirtualMouse = None  # type: ignore
             try:
-                from .Virtual_Mouse import VirtualMouse
+                from .Virtual_Mouse import VirtualMouse  # type: ignore
                 VIRTUAL_MOUSE_AVAILABLE = True
             except ImportError:
                 try:
-                    from Virtual_Mouse import VirtualMouse
+                    from Virtual_Mouse import VirtualMouse  # type: ignore
                     VIRTUAL_MOUSE_AVAILABLE = True
                 except ImportError:
                     VIRTUAL_MOUSE_AVAILABLE = False
             
-            if VIRTUAL_MOUSE_AVAILABLE:
+            if VIRTUAL_MOUSE_AVAILABLE and VirtualMouse is not None:
                 virtual_mouse = VirtualMouse()
                 
                 # Get window rect for click positioning
@@ -839,35 +840,6 @@ def bring_roblox_to_front():
         
     except Exception as general_error:
         print(f"❌ Error attempting to focus Roblox: {general_error}")
-        return False
-        
-        if not success:
-            try:
-                # Method 3: Try ultra-stealth VirtualMouse if available
-                from . import Virtual_Mouse
-                virtual_mouse = Virtual_Mouse.VirtualMouse()
-                rect = win32gui.GetWindowRect(hwnd)
-                center_x = (rect[0] + rect[2]) // 2
-                center_y = (rect[1] + rect[3]) // 2
-                
-                # Ultra-stealth click on window center to focus it
-                success = virtual_mouse.ultimate_stealth_click(center_x, center_y)
-                if success:
-                    print(f"🛡️ [ULTRA-STEALTH] PostMessage center focus at ({center_x}, {center_y})")
-                else:
-                    print(f"🛡️ [ULTRA-STEALTH] Enhanced center focus at ({center_x}, {center_y})")
-                time.sleep(0.5)
-                success = True
-            except Exception as e:
-                pass
-        
-        if success:
-            time.sleep(0.5)  # Give window time to come to front
-            return True
-        else:
-            return False
-    
-    except Exception as e:
         return False
 
 

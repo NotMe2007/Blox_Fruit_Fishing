@@ -9,35 +9,32 @@ import win32con
 import win32process
 import time
 
-# Virtual Mouse for undetectable input
+# Import from centralized Import_Utils
 try:
-    from .Virtual_Mouse import VirtualMouse
-    VIRTUAL_MOUSE_AVAILABLE = True
+    from .Import_Utils import (  # type: ignore
+        debug_log, LogCategory, DEBUG_LOGGER_AVAILABLE,
+        virtual_mouse, VIRTUAL_MOUSE_AVAILABLE, is_virtual_mouse_available
+    )
 except ImportError:
     try:
-        from Virtual_Mouse import VirtualMouse
-        VIRTUAL_MOUSE_AVAILABLE = True
+        from Import_Utils import (  # type: ignore
+            debug_log, LogCategory, DEBUG_LOGGER_AVAILABLE,
+            virtual_mouse, VIRTUAL_MOUSE_AVAILABLE, is_virtual_mouse_available
+        )
     except ImportError:
-        VIRTUAL_MOUSE_AVAILABLE = False
-
-# Debug Logger
-try:
-    from .Debug_Logger import debug_log, LogCategory
-    DEBUG_LOGGER_AVAILABLE = True
-except ImportError:
-    try:
-        from Debug_Logger import debug_log, LogCategory
-        DEBUG_LOGGER_AVAILABLE = True
-    except ImportError:
-        DEBUG_LOGGER_AVAILABLE = False
-        # Fallback log categories
+        # Final fallback if Import_Utils not available
         from enum import Enum
-        class LogCategory(Enum):
+        class LogCategory(Enum):  # type: ignore
             WINDOW_MANAGEMENT = "WINDOW_MANAGEMENT"
             SYSTEM = "SYSTEM"
             ERROR = "ERROR"
-        def debug_log(category, message):
+        def debug_log(category, message):  # type: ignore
             print(f"[{category.value}] {message}")
+        DEBUG_LOGGER_AVAILABLE = False
+        virtual_mouse = None  # type: ignore
+        VIRTUAL_MOUSE_AVAILABLE = False
+        def is_virtual_mouse_available():  # type: ignore
+            return False
 
 
 class RobloxWindowManager:
@@ -47,14 +44,10 @@ class RobloxWindowManager:
         self.last_validation = 0
         self.validation_interval = 2.0  # Check window every 2 seconds
         
-        # Initialize virtual mouse for undetectable input
-        if VIRTUAL_MOUSE_AVAILABLE:
-            try:
-                self.virtual_mouse = VirtualMouse()
-                debug_log(LogCategory.WINDOW_MANAGEMENT, "VirtualMouse initialized successfully")
-            except Exception as e:
-                debug_log(LogCategory.ERROR, f"Failed to initialize VirtualMouse: {e}")
-                self.virtual_mouse = None
+        # Initialize virtual mouse for undetectable input (from Import_Utils)
+        if is_virtual_mouse_available():
+            self.virtual_mouse = virtual_mouse
+            debug_log(LogCategory.WINDOW_MANAGEMENT, "VirtualMouse initialized successfully")
         else:
             self.virtual_mouse = None
             debug_log(LogCategory.WINDOW_MANAGEMENT, "VirtualMouse not available - using fallback methods")
@@ -266,6 +259,10 @@ class RobloxWindowManager:
             
             # Method A: Smart ShowWindow + SetForegroundWindow (AHK standard but improved)
             # Check if window is minimized before restoring to avoid unwanted resizing
+            if self.roblox_hwnd is None:
+                debug_log(LogCategory.ERROR, "Cannot check window placement - hwnd is None")
+                return False
+            
             placement = win32gui.GetWindowPlacement(self.roblox_hwnd)
             window_state = placement[1]  # SW_HIDE=0, SW_NORMAL=1, SW_MINIMIZED=2, SW_MAXIMIZED=3
             

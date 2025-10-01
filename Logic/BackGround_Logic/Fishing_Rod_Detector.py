@@ -8,29 +8,26 @@ import win32gui
 from pathlib import Path
 import importlib.util
 
-# Import virtual mouse driver
-virtual_mouse = None
-VIRTUAL_MOUSE_AVAILABLE = False
-
+# Import from centralized Import_Utils
 try:
-    # Try relative import first (when imported as package)
-    from .Virtual_Mouse import VirtualMouse
-    virtual_mouse = VirtualMouse()
-    VIRTUAL_MOUSE_AVAILABLE = True
+    from .Import_Utils import (  # type: ignore
+        virtual_mouse, VIRTUAL_MOUSE_AVAILABLE, is_virtual_mouse_available,
+        screenshot, SCREEN_CAPTURE_AVAILABLE
+    )
 except ImportError:
     try:
-        # Add current directory to path and try absolute import
-        import sys
-        import os
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        if current_dir not in sys.path:
-            sys.path.insert(0, current_dir)
-        from Virtual_Mouse import VirtualMouse
-        virtual_mouse = VirtualMouse()
-        VIRTUAL_MOUSE_AVAILABLE = True
+        from Import_Utils import (  # type: ignore
+            virtual_mouse, VIRTUAL_MOUSE_AVAILABLE, is_virtual_mouse_available,
+            screenshot, SCREEN_CAPTURE_AVAILABLE
+        )
     except ImportError:
-        virtual_mouse = None
+        # Final fallback if Import_Utils not available
+        virtual_mouse = None  # type: ignore
         VIRTUAL_MOUSE_AVAILABLE = False
+        def is_virtual_mouse_available():  # type: ignore
+            return False
+        screenshot = None  # type: ignore
+        SCREEN_CAPTURE_AVAILABLE = False
 
 
 # Cache for detector module to prevent reloading
