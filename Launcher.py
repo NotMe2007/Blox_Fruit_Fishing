@@ -1,4 +1,6 @@
 import os
+import re
+import shlex
 import sys
 import json
 import shutil
@@ -21,9 +23,86 @@ DEFAULT_REQUIREMENTS = [
     "numpy",
     "opencv-python",
     "psutil",
-    "pywin32",
+    "pywin32; platform_system == 'Windows'",
     "requests",
 ]
+
+
+def _get_python_version(python_cmd: list[str]) -> tuple[str, tuple[int, int, int]]:
+    try:
+        result = subprocess.run(
+            python_cmd + ["--version"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except (FileNotFoundError, OSError) as exc:
+        raise RuntimeError(f"Unable to execute {' '.join(python_cmd)}: {exc}") from exc
+
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"Command {' '.join(python_cmd)} --version returned exit code {result.returncode}"
+        )
+
+    version_output = (result.stdout or result.stderr or "").strip()
+    match = re.search(r"Python\s+(\d+)\.(\d+)\.(\d+)", version_output)
+    if not match:
+        raise RuntimeError(f"Could not parse Python version from '{version_output}'.")
+
+    major, minor, patch = (int(part) for part in match.groups())
+    version_tuple = (major, minor, patch)
+    return version_output, version_tuple
+
+
+def _venv_python_path() -> Path:
+    if os.name == "nt":
+        return Path(".venv") / "Scripts" / "python.exe"
+    return Path(".venv") / "bin" / "python"
+
+
+def acquire_python_command() -> tuple[list[str], bool, str, tuple[int, int, int]]:
+    candidates: list[tuple[list[str], bool]] = []
+    venv_python = _venv_python_path()
+
+    if venv_python.exists():
+        candidates.append(([str(venv_python)], True))
+
+    override_cmd = os.environ.get("BFF_PYTHON_CMD")
+    if override_cmd:
+        candidates.append((shlex.split(override_cmd), False))
+
+    if not getattr(sys, "frozen", False):
+        candidates.append(([sys.executable], False))
+
+    names = ["python3", "python"] if os.name != "nt" else [
+        "python.exe",
+        "python3.exe",
+        "python",
+    ]
+    for name in names:
+        path = shutil.which(name)
+        if path:
+            candidates.append(([path], False))
+
+    if os.name == "nt" and shutil.which("py"):
+        candidates.append((["py", "-3"], False))
+
+    seen: set[tuple[str, ...]] = set()
+    for command, is_venv in candidates:
+        key = tuple(command)
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            version_text, version_tuple = _get_python_version(command)
+            return command, is_venv, version_text, version_tuple
+        except RuntimeError:
+            continue
+
+    raise RuntimeError(
+        "Unable to locate a working Python interpreter. Install Python 3.8+ or create a "
+        "virtual environment in this folder."
+    )
 
 
 def print_header() -> None:
@@ -33,7 +112,13 @@ def print_header() -> None:
 
 
 def ensure_working_directory() -> None:
-    os.chdir(Path(__file__).resolve().parent)
+    if getattr(sys, "frozen", False):
+        base_dir = Path(sys.executable).resolve().parent
+        if not (base_dir / "Main.py").exists() and (base_dir.parent / "Main.py").exists():
+            base_dir = base_dir.parent
+    else:
+        base_dir = Path(__file__).resolve().parent
+    os.chdir(base_dir)
 
 
 def read_local_version() -> str:
@@ -171,33 +256,19 @@ def check_for_updates() -> None:
     print(" ℹ️  The launcher will now continue using the updated files.\n")
 
 
-def ensure_python_version() -> None:
-    version_info = sys.version_info
-    detected = f"{version_info.major}.{version_info.minor}.{version_info.micro}"
+def ensure_python_version(version_text: str, version_info: tuple[int, int, int]) -> None:
     print("[STEP 1] Checking Python installation...")
-    print(f" ✅ Python is installed\nPython {detected}")
+    print(" ✅ Python is installed")
+    print(version_text)
 
+    print("\n[STEP 1.5] Checking Python version...")
     if version_info < MIN_PYTHON:
         required = ".".join(map(str, MIN_PYTHON))
-        print(f" ❌ Python version is too old (need {required}+). Detected: {detected}")
+        print(
+            f" ❌ Python version is too old (need {required}+). Detected: {version_text}"
+        )
         sys.exit(1)
-    print("\n[STEP 1.5] Checking Python version...")
     print(" ✅ Python version is compatible\n")
-
-
-def resolve_python_commands() -> tuple[list[str], list[str]]:
-    venv_python = Path(".venv") / "Scripts" / "python.exe"
-    if venv_python.exists():
-        python_cmd = [str(venv_python)]
-        pip_cmd = python_cmd + ["-m", "pip"]
-        print("[STEP 2] Checking virtual environment...")
-        print(" ✅ Virtual environment found\n")
-    else:
-        python_cmd = [sys.executable]
-        pip_cmd = python_cmd + ["-m", "pip"]
-        print("[STEP 2] Checking virtual environment...")
-        print(" ⚠️  No virtual environment found. Using system Python and pip.\n")
-    return python_cmd, pip_cmd
 
 
 def ensure_requirements(pip_cmd: list[str]) -> None:
@@ -273,8 +344,24 @@ def main() -> None:
     print_header()
     ensure_working_directory()
     check_for_updates()
-    ensure_python_version()
-    python_cmd, pip_cmd = resolve_python_commands()
+    try:
+        python_cmd, using_venv, version_text, version_info = acquire_python_command()
+    except RuntimeError as exc:
+        print("[STEP 1] Checking Python installation...")
+        print(f" ❌ {exc}")
+        print("    Install Python from https://www.python.org/downloads/ to continue.")
+        sys.exit(1)
+
+    ensure_python_version(version_text, version_info)
+
+    print("[STEP 2] Checking virtual environment...")
+    if using_venv:
+        print(" ✅ Virtual environment found\n")
+    else:
+        readable_cmd = " ".join(python_cmd)
+        print(f" ⚠️  No virtual environment found. Using system Python command: {readable_cmd}\n")
+
+    pip_cmd = python_cmd + ["-m", "pip"]
     ensure_requirements(pip_cmd)
     if run_quick_tests(python_cmd):
         launch_main_app(python_cmd)
