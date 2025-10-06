@@ -568,11 +568,44 @@ class RobloxChecker:
             
             # Method 4: Fallback - if we have a "Roblox" window, assume it might be Blox Fruits
             if window_title and window_title.lower().strip() == 'roblox':
-                print("DEBUG: Found generic 'Roblox' window - assuming Blox Fruits (skipping API due to update)")
-                # Skip API calls since they're failing after Roblox update - just assume it's Blox Fruits
-                result = (True, "Blox Fruits (Generic Window)", 2753915549)
-                self.api_cache[cache_key] = (result, current_time)
-                return result
+                        print("DEBUG: Found generic 'Roblox' window - attempting API verification...")
+
+                        verified_via_api = False
+                        game_id = None
+                        game_info = None
+
+                        try:
+                            process_details = self.get_roblox_process_info()
+                            if process_details and isinstance(process_details, dict):
+                                game_id = process_details.get('game_id')
+                        except Exception as api_exc:  # pragma: no cover - defensive
+                            if self.debug:
+                                print(f"DEBUG: Process info lookup failed during generic window check: {api_exc}")
+
+                        if game_id:
+                            game_info = self.get_game_info_from_api(game_id)
+                            if game_info:
+                                game_name = game_info.get('name', game_info.get('title', f'Game {game_id}'))
+                                is_blox_fruits = any(keyword.lower() in game_name.lower() for keyword in self.blox_fruits_keywords)
+                                result = (is_blox_fruits, game_name, game_id)
+                                self.api_cache[cache_key] = (result, current_time)
+                                if is_blox_fruits:
+                                    print(f"✅ API confirmed Blox Fruits via game ID {game_id}")
+                                else:
+                                    print(f"⚠️ API indicates different game '{game_name}' (ID: {game_id})")
+                                return result
+                            else:
+                                print(f"⚠️ API lookup failed for game ID {game_id} - using fallback")
+                                verified_via_api = False
+                        else:
+                            if self.debug:
+                                print("DEBUG: No game ID available from process info during generic window check")
+
+                        if not verified_via_api:
+                            print("ℹ️ API not available or inconclusive - using legacy generic Roblox fallback")
+                            result = (True, "Blox Fruits (Generic Window)", 2753915549)
+                            self.api_cache[cache_key] = (result, current_time)
+                            return result
             
             # Method 5: Return window title info even if not Blox Fruits
             if window_title and window_title not in ['MSCTFIME UI']:

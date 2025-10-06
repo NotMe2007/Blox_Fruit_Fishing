@@ -24,6 +24,8 @@ def run_test_module(test_file_path):
     try:
         # Load and run the test module
         spec = importlib.util.spec_from_file_location("test_module", test_file_path)
+        if spec is None or spec.loader is None:
+            raise RuntimeError(f"Unable to load test module spec for {test_file_path}")
         test_module = importlib.util.module_from_spec(spec)
         
         # Capture stdout to determine test results
@@ -144,6 +146,7 @@ def main():
         tests_dir / "test_imports.py",
         tests_dir / "test_debug_logger.py", 
         tests_dir / "test_virtual_mouse.py",
+        tests_dir / "test_fishing_rod_detector.py",
         tests_dir / "test_window_manager.py",
         tests_dir / "test_fishing_script.py"
     ]

@@ -164,6 +164,12 @@ BOTTOM_RIGHT = (1189, 1072)
 threshold = 0.50   # matching threshold (0-1). Increased from 35% to 50% for better accuracy
 debug = True       # set True to print info and save debug image
 
+# Confidence tuning
+EQ_PRIORITY_MARGIN = 0.04   # Minimum EQ score advantage over UN to trust EQ when both exceed threshold
+UN_PRIORITY_MARGIN = 0.025  # Minimum UN score advantage over EQ when both exceed threshold
+LETTER_SCORE_THRESHOLD = 0.55
+LETTER_DIFF_MARGIN = 0.05
+
 
 def load_templates():
     # Use absolute paths so imports from other folders find them reliably
@@ -245,6 +251,40 @@ def multi_scale_match(screenshot_gray, template_gray, scales=None):
 
     # Return scalar values
     return float(best_val), best_loc, best_scale, best_size
+
+
+def _compute_letter_similarity(screenshot_gray, match_loc, match_size, template_gray, letter_ratio=0.3):
+    """Evaluate how closely the right-side letters of the template match the screenshot."""
+    if match_loc is None or match_size is None or template_gray is None:
+        return None
+
+    x, y = int(match_loc[0]), int(match_loc[1])
+    w, h = int(match_size[0]), int(match_size[1])
+
+    if w <= 4 or h <= 4:
+        return None
+
+    letter_w = max(4, int(w * letter_ratio))
+    sx1 = x + w - letter_w
+    sx2 = x + w
+    sy1 = y
+    sy2 = y + h
+
+    if sx1 < 0 or sy1 < 0 or sx2 > screenshot_gray.shape[1] or sy2 > screenshot_gray.shape[0]:
+        return None
+
+    region = screenshot_gray[sy1:sy2, sx1:sx2]
+
+    templ_letter_w = max(4, int(template_gray.shape[1] * letter_ratio))
+    templ_segment = template_gray[:, template_gray.shape[1] - templ_letter_w:]
+
+    try:
+        templ_resized = cv2.resize(templ_segment, (letter_w, h), interpolation=cv2.INTER_AREA)
+        res = cv2.matchTemplate(region, templ_resized, cv2.TM_CCOEFF_NORMED)
+        _, score, _, _ = cv2.minMaxLoc(res)
+        return float(score)
+    except Exception:
+        return None
 
 
 def check_region_and_act():
@@ -373,11 +413,42 @@ def check_region_and_act():
     # Decide - ensure all values are scalar
     best_un_val_scalar = float(best_un_val) if best_un_val is not None else -1.0
     best_eq_val_scalar = float(best_eq_val) if best_eq_val is not None else -1.0
-    
-    # Prioritize UN detection - if UN is above threshold, click it (even if EQ score is higher)
-    # This is more aggressive but necessary for reliable rod equipping
-    if (best_un_loc is not None and best_un_size is not None and 
-        best_un_val_scalar >= threshold):
+
+    un_candidate = (best_un_loc is not None and best_un_size is not None and best_un_val_scalar >= threshold)
+    eq_candidate = (best_eq_loc is not None and best_eq_size is not None and best_eq_val_scalar >= threshold)
+
+    # Evaluate textual letter region to disambiguate UN vs EQ when scores are close
+    eq_letter_score = _compute_letter_similarity(screenshot_gray, best_eq_loc, best_eq_size, eq_gray)
+    eq_letter_un_score = _compute_letter_similarity(screenshot_gray, best_eq_loc, best_eq_size, un_gray)
+    un_letter_score = _compute_letter_similarity(screenshot_gray, best_un_loc, best_un_size, un_gray)
+    un_letter_eq_score = _compute_letter_similarity(screenshot_gray, best_un_loc, best_un_size, eq_gray)
+
+    eq_stronger = best_eq_val_scalar - best_un_val_scalar >= EQ_PRIORITY_MARGIN
+    un_stronger = best_un_val_scalar - best_eq_val_scalar >= UN_PRIORITY_MARGIN
+
+    eq_letter_confident = (
+        eq_letter_score is not None and
+        eq_letter_score >= LETTER_SCORE_THRESHOLD and
+        (eq_letter_un_score is None or eq_letter_score - eq_letter_un_score >= LETTER_DIFF_MARGIN)
+    )
+
+    un_letter_confident = (
+        un_letter_score is not None and
+        un_letter_score >= LETTER_SCORE_THRESHOLD and
+        (un_letter_eq_score is None or un_letter_score - un_letter_eq_score >= LETTER_DIFF_MARGIN)
+    )
+
+    eq_super_confident = best_eq_val_scalar >= threshold + 0.1
+    un_super_confident = best_un_val_scalar >= threshold + 0.1
+
+    if eq_candidate and (not un_candidate or eq_stronger or eq_super_confident or eq_letter_confident):
+        print(f'EQ detected in region - rod is equipped (score={best_eq_val_scalar:.3f}, UN={best_un_val_scalar:.3f})')
+        if eq_letter_score is not None:
+            print(f'🅴 Letter confidence: EQ={eq_letter_score:.3f} vs UN={eq_letter_un_score if eq_letter_un_score is not None else "n/a"}')
+        return False
+
+    if (best_un_loc is not None and best_un_size is not None and best_un_val_scalar >= threshold and
+        (not eq_candidate or un_stronger or un_super_confident or un_letter_confident)):
         tw, th = best_un_size
         click_x = left + int(best_un_loc[0]) + tw // 2
         click_y = top + int(best_un_loc[1]) + th // 2
@@ -469,11 +540,15 @@ def check_region_and_act():
             print(f'❌ Ultimate stealth fallback failed: {e}')
             return False
 
-    # Only check for EQ if UN was not detected above threshold
-    if (best_eq_loc is not None and best_eq_size is not None and 
-        best_eq_val_scalar >= threshold and best_un_val_scalar < threshold):
-        print(f'EQ detected in region - rod is equipped (score={best_eq_val_scalar:.3f})')
-        return False
+    # Provide additional context when scores are close but conditions failed
+    if eq_candidate:
+        print(f'ℹ️ EQ candidate score={best_eq_val_scalar:.3f}, UN score={best_un_val_scalar:.3f} – awaiting stronger evidence')
+        if eq_letter_score is not None:
+            print(f'   Letter match EQ={eq_letter_score:.3f} vs UN={eq_letter_un_score if eq_letter_un_score is not None else "n/a"}')
+    if un_candidate:
+        print(f'ℹ️ UN candidate score={best_un_val_scalar:.3f}, EQ score={best_eq_val_scalar:.3f} – awaiting stronger evidence')
+        if un_letter_score is not None:
+            print(f'   Letter match UN={un_letter_score:.3f} vs EQ={un_letter_eq_score if un_letter_eq_score is not None else "n/a"}')
 
     # Enhanced debug information for failed detections
     print(f'No UN or EQ detected in the region')
