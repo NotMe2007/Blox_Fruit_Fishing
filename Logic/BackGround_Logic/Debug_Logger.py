@@ -271,6 +271,11 @@ def set_preset(preset_name: str):
         "performance": LogPresets.PERFORMANCE,
         "template": LogPresets.TEMPLATE_DEBUG,
         "full": LogPresets.FULL_DEBUG,
+        "all_enabled": LogPresets.FULL_DEBUG,
+        "all": LogPresets.FULL_DEBUG,
+        "full_debug": LogPresets.FULL_DEBUG,
+        "fish_debug": LogPresets.FISH_DEBUG,
+        "minigame_debug": LogPresets.MINIGAME_DEBUG,
         "silent": LogPresets.SILENT
     }
     

@@ -12,14 +12,14 @@ import time
 # Import from centralized Import_Utils
 try:
     from .Import_Utils import (  # type: ignore
-        debug_log, LogCategory, DEBUG_LOGGER_AVAILABLE,
-        virtual_mouse, VIRTUAL_MOUSE_AVAILABLE, is_virtual_mouse_available
+        debug_log, LogCategory, DEBUG_LOGGER_AVAILABLE, # type: ignore
+        virtual_mouse, VIRTUAL_MOUSE_AVAILABLE, is_virtual_mouse_available # type: ignore
     )
 except ImportError:
     try:
         from Import_Utils import (  # type: ignore
-            debug_log, LogCategory, DEBUG_LOGGER_AVAILABLE,
-            virtual_mouse, VIRTUAL_MOUSE_AVAILABLE, is_virtual_mouse_available
+            debug_log, LogCategory, DEBUG_LOGGER_AVAILABLE, # type: ignore
+            virtual_mouse, VIRTUAL_MOUSE_AVAILABLE, is_virtual_mouse_available # type: ignore
         )
     except ImportError:
         # Final fallback if Import_Utils not available

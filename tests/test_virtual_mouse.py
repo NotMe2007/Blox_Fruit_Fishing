@@ -158,7 +158,7 @@ def run_virtual_mouse_tests():
         lambda: test_input_structure_creation(mouse)
     ]
     
-    passed = 1  # Already passed import and init
+    passed = 2  # Import and initialization already succeeded
     total = len(tests) + 2  # +2 for import and init
     
     for test_func in tests:

@@ -168,7 +168,7 @@ def run_window_manager_tests():
         test_coordinate_functions
     ]
     
-    passed = 1  # Already passed import and init
+    passed = 2  # Import and initialization already succeeded
     total = len(tests) + 2  # +2 for import and init
     
     for test_func in tests:
