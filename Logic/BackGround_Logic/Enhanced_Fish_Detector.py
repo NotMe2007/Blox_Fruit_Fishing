@@ -15,22 +15,44 @@ import numpy as np
 from pathlib import Path
 import time
 
-# Debug Logger - Import from centralized Import_Utils
+# Debug Logger & Screen Capture - Import from centralized Import_Utils
 try:
-    from .Import_Utils import debug_log, LogCategory, DEBUG_LOGGER_AVAILABLE  # type: ignore
+    from .Import_Utils import (  # type: ignore
+        debug_log,
+        LogCategory as _LogCategory,
+        DEBUG_LOGGER_AVAILABLE,
+        screenshot,
+        SCREEN_CAPTURE_AVAILABLE,
+    )
 except ImportError:
     try:
-        from Import_Utils import debug_log, LogCategory, DEBUG_LOGGER_AVAILABLE  # type: ignore
+        from Import_Utils import (  # type: ignore
+            debug_log,
+            LogCategory as _LogCategory,
+            DEBUG_LOGGER_AVAILABLE,
+            screenshot,
+            SCREEN_CAPTURE_AVAILABLE,
+        )
     except ImportError:
         # Final fallback if Import_Utils not available
         from enum import Enum
-        class LogCategory(Enum):  # type: ignore
+
+        class _LocalLogCategory(Enum):  # type: ignore
             FISH_DETECTION = "FISH_DETECTION"
             ERROR = "ERROR"
             SYSTEM = "SYSTEM"
+
         def debug_log(category, message):  # type: ignore
             print(f"[{category.value}] {message}")
+
         DEBUG_LOGGER_AVAILABLE = False
+        screenshot = None  # type: ignore
+        SCREEN_CAPTURE_AVAILABLE = False
+        LogCategory = _LocalLogCategory  # type: ignore
+    else:
+        LogCategory = _LogCategory  # type: ignore
+else:
+    LogCategory = _LogCategory  # type: ignore
 
 class EnhancedFishDetector:
     """Enhanced fish detector that reduces false positives from environmental colors."""
@@ -96,22 +118,31 @@ class EnhancedFishDetector:
         try:
             # CRITICAL: Always get screenshot of ONLY the specified region, not full screen
             if screenshot_bgr is None:
-                import pyautogui
-                # Check if region coordinates are valid
                 x, y, width, height = region
                 if width <= 0 or height <= 0:
                     debug_log(LogCategory.ERROR, f"❌ Invalid region dimensions: {width}x{height}")
                     return False, 0.0, "invalid_region"
-                
-                try:
-                    screenshot = pyautogui.screenshot(region=(x, y, width, height))
-                    if screenshot.size == (0, 0):
-                        debug_log(LogCategory.ERROR, f"❌ Screenshot is empty for region: {region}")
-                        return False, 0.0, "empty_screenshot"
-                    screenshot_bgr = cv2.cvtColor(np.array(screenshot), cv2.COLOR_RGB2BGR)
-                except Exception as e:
-                    debug_log(LogCategory.ERROR, f"❌ Screenshot capture failed: {e}")
-                    return False, 0.0, "screenshot_error"
+
+                captured_image = None
+                if SCREEN_CAPTURE_AVAILABLE and screenshot is not None:
+                    try:
+                        captured_image = screenshot(region=(x, y, width, height))
+                    except Exception as capture_error:
+                        debug_log(LogCategory.ERROR, f"❌ Primary screenshot capture failed: {capture_error}")
+
+                if captured_image is None:
+                    try:
+                        from PIL import ImageGrab
+                        captured_image = ImageGrab.grab(bbox=(x, y, x + width, y + height))
+                    except Exception as fallback_error:
+                        debug_log(LogCategory.ERROR, f"❌ Screenshot fallback failed: {fallback_error}")
+                        return False, 0.0, "screenshot_error"
+
+                if captured_image is None or captured_image.size == (0, 0):
+                    debug_log(LogCategory.ERROR, f"❌ Screenshot is empty for region: {region}")
+                    return False, 0.0, "empty_screenshot"
+
+                screenshot_bgr = cv2.cvtColor(np.array(captured_image), cv2.COLOR_RGB2BGR)
             else:
                 # If screenshot provided, crop it to the specified region
                 x, y, width, height = region
@@ -302,8 +333,12 @@ class EnhancedFishDetector:
             # Color validation - check if it's actually a bright/contrasting element
             mask = np.zeros(screenshot_bgr.shape[:2], np.uint8)
             cv2.drawContours(mask, [contour], -1, 255, -1)
-            mean_color = cv2.mean(screenshot_bgr, mask=mask)[:3]
-            brightness = (mean_color[0] + mean_color[1] + mean_color[2]) / 3
+            mean_color = cv2.mean(screenshot_bgr, mask=mask)
+            if isinstance(mean_color, tuple):
+                mean_color_values = mean_color[:3]
+            else:
+                mean_color_values = (0.0, 0.0, 0.0)
+            brightness = sum(mean_color_values) / 3
             
             # Bright elements (likely exclamation marks)
             if brightness > 150:

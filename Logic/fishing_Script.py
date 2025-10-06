@@ -63,13 +63,6 @@ except ImportError as e:
     EnhancedFishDetector = None  # type: ignore
     debug_log(LogCategory.SYSTEM, f"Warning: Enhanced Fish Detector not available: {e}")
 
-# Import pyautogui for fallback mouse control (detection risk - use Virtual_Mouse instead)
-try:
-    import pyautogui
-    PYAUTOGUI_AVAILABLE = True
-except ImportError:
-    PYAUTOGUI_AVAILABLE = False
-    pyautogui = None  # type: ignore
 
 
 def smooth_move_to(target_x, target_y, duration=None):
@@ -166,6 +159,26 @@ def get_screen_size():
 
 
 
+def _capture_region(region):
+    """Capture a screen region using the primary screen capture pipeline."""
+    if SCREEN_CAPTURE_AVAILABLE and screenshot is not None:
+        try:
+            return screenshot(region=region)
+        except Exception as e:
+            debug_log(LogCategory.ERROR, f"Primary screenshot capture failed: {e}")
+    try:
+        from PIL import ImageGrab
+        x, y, w, h = region
+        return ImageGrab.grab(bbox=(x, y, x + w, y + h))
+    except Exception as e:
+        debug_log(LogCategory.ERROR, f"Fallback screenshot capture failed: {e}")
+        return None
+
+
+
+
+
+
 
 
 def CastFishingRod(x, y, hold_seconds=0.93):
@@ -190,7 +203,7 @@ def CastFishingRod(x, y, hold_seconds=0.93):
     
     # Use virtual mouse for casting if available
     if is_virtual_mouse_available():
-        print("🛡️ [ULTRA-STEALTH] Using enhanced hardware-level casting")
+        debug_log(LogCategory.CASTING, "🛡️ [ULTRA-STEALTH] Using enhanced hardware-level casting")
         
         # Enhanced anti-detection: Larger random offset range
         cast_offset_x = random.randint(-8, 8)
@@ -208,7 +221,7 @@ def CastFishingRod(x, y, hold_seconds=0.93):
         # Get current mouse position for natural movement
         current_pos = virtual_mouse.get_cursor_pos()
         if current_pos:
-            print(f"🛡️ [ULTRA-STEALTH] Natural pre-cast movement from ({current_pos[0]}, {current_pos[1]})")
+            debug_log(LogCategory.CASTING, f"🛡️ [ULTRA-STEALTH] Natural pre-cast movement from ({current_pos[0]}, {current_pos[1]})")
             # Move naturally to approach position
             virtual_mouse.human_like_move(current_pos[0], current_pos[1], approach_x, approach_y, 
                                         random.uniform(0.3, 0.7))
@@ -217,7 +230,7 @@ def CastFishingRod(x, y, hold_seconds=0.93):
         
         # Phase 2: Human hesitation and adjustment
         hesitation_delay = random.uniform(0.2, 0.5)
-        print(f"🛡️ [ULTRA-STEALTH] Human-like hesitation ({hesitation_delay:.2f}s)")
+        debug_log(LogCategory.CASTING, f"🛡️ [ULTRA-STEALTH] Human-like hesitation ({hesitation_delay:.2f}s)")
         time.sleep(hesitation_delay)
         
         # Small adjustment movement (like a human fine-tuning position)
@@ -227,16 +240,16 @@ def CastFishingRod(x, y, hold_seconds=0.93):
         time.sleep(random.uniform(0.1, 0.25))
         
         # Phase 3: Final approach to cast position with natural curve
-        print(f"🎣 [ULTRA-STEALTH] Natural approach to cast position ({final_cast_x}, {final_cast_y})")
+        debug_log(LogCategory.CASTING, f"🎣 [ULTRA-STEALTH] Natural approach to cast position ({final_cast_x}, {final_cast_y})")
         virtual_mouse.human_like_move(adjust_x, adjust_y, final_cast_x, final_cast_y, 
                                     random.uniform(0.2, 0.4))
         
         # Phase 4: Pre-cast stabilization (human behavior)
         stabilize_delay = random.uniform(0.1, 0.3)
-        print(f"🛡️ [ULTRA-STEALTH] Pre-cast stabilization ({stabilize_delay:.2f}s)")
+        debug_log(LogCategory.CASTING, f"🛡️ [ULTRA-STEALTH] Pre-cast stabilization ({stabilize_delay:.2f}s)")
         time.sleep(stabilize_delay)
         
-        print(f"🎣 [ULTRA-STEALTH] Enhanced hardware casting for {actual_hold:.2f}s")
+        debug_log(LogCategory.CASTING, f"🎣 [ULTRA-STEALTH] Enhanced hardware casting for {actual_hold:.2f}s")
         
         # Phase 5: Enhanced casting with variable timing
         cast_start_delay = random.uniform(0.05, 0.15)  # Human reaction time
@@ -249,7 +262,7 @@ def CastFishingRod(x, y, hold_seconds=0.93):
         
         # Phase 6: Post-cast natural behavior
         post_cast_delay = random.uniform(0.2, 0.6)
-        print(f"🛡️ [ULTRA-STEALTH] Post-cast natural delay ({post_cast_delay:.2f}s)")
+        debug_log(LogCategory.CASTING, f"🛡️ [ULTRA-STEALTH] Post-cast natural delay ({post_cast_delay:.2f}s)")
         time.sleep(post_cast_delay)
         
         # Optional natural post-cast movement (50% chance)
@@ -257,9 +270,9 @@ def CastFishingRod(x, y, hold_seconds=0.93):
             post_move_x = final_cast_x + random.randint(-15, 15)
             post_move_y = final_cast_y + random.randint(-15, 15)
             virtual_mouse.move_to(post_move_x, post_move_y)
-            print(f"🛡️ [ULTRA-STEALTH] Natural post-cast movement to ({post_move_x}, {post_move_y})")
+            debug_log(LogCategory.CASTING, f"🛡️ [ULTRA-STEALTH] Natural post-cast movement to ({post_move_x}, {post_move_y})")
         
-        print("✅ [ULTRA-STEALTH] Enhanced hardware casting completed")
+        debug_log(LogCategory.CASTING, "✅ [ULTRA-STEALTH] Enhanced hardware casting completed")
         
     else:
         # Fallback: Use Windows API directly for mouse control
@@ -446,19 +459,16 @@ def _detect_fish_on_hook_template(region):
             return _detect_exclamation_indicator_fallback(region)
         
         # DEBUG: Save screenshot of the detection region
-        try:
-            import pyautogui
-            screenshot = pyautogui.screenshot(region=region)
-            
-            # Ensure debug directory exists
-            debug_dir = Path(__file__).parent.parent / 'debug'
-            debug_dir.mkdir(exist_ok=True)
-            
-            debug_path = debug_dir / 'fish_detection_region.png'
-            screenshot.save(debug_path)
-            debug_log(LogCategory.FISH_DETECTION, f"🔍 DEBUG: Saved detection region screenshot to {debug_path}")
-        except Exception as debug_e:
-            debug_log(LogCategory.ERROR, f"⚠️ Debug screenshot failed: {debug_e}")
+        debug_image = _capture_region(region)
+        if debug_image is not None:
+            try:
+                debug_dir = Path(__file__).parent.parent / 'debug'
+                debug_dir.mkdir(exist_ok=True)
+                debug_path = debug_dir / 'fish_detection_region.png'
+                debug_image.save(debug_path)
+                debug_log(LogCategory.FISH_DETECTION, f"🔍 DEBUG: Saved detection region screenshot to {debug_path}")
+            except Exception as debug_e:
+                debug_log(LogCategory.ERROR, f"⚠️ Debug screenshot save failed: {debug_e}")
         
         # Since this is a large AI-processed template, use multi-scale matching
         # for better accuracy across different game resolutions
@@ -498,25 +508,25 @@ def _detect_fish_on_hook_template(region):
         
         # If no match at standard thresholds, try very low threshold as last resort
         if not found_at_any_scale and best_score > 0.35:
-            print(f"🔍 Trying very low threshold detection (best score: {best_score:.3f})")
+            debug_log(LogCategory.FISH_DETECTION, f"🔍 Trying very low threshold detection (best score: {best_score:.3f})")
             # Try the original template with very low threshold
             found_low, score_low = _match_template_in_region(FISH_ON_HOOK_TPL, region, threshold=0.35)
             if found_low:
-                print(f"🐟 FISH ON HOOK DETECTED via template (low threshold)! (score: {score_low:.3f})")
+                debug_log(LogCategory.FISH_DETECTION, f"🐟 FISH ON HOOK DETECTED via template (low threshold)! (score: {score_low:.3f})")
                 return True, score_low
         
         # If still no detection, try simple color-based detection as emergency fallback
         if not found_at_any_scale and best_score < 0.3:
-            print("🔍 Template detection failed, trying color-based emergency detection...")
+            debug_log(LogCategory.FISH_DETECTION, "🔍 Template detection failed, trying color-based emergency detection...")
             color_found, color_score = _detect_red_exclamation_simple(region)
             if color_found:
-                print(f"🐟 FISH DETECTED via color fallback! (score: {color_score:.3f})")
+                debug_log(LogCategory.FISH_DETECTION, f"🐟 FISH DETECTED via color fallback! (score: {color_score:.3f})")
                 return True, color_score
         
         return found_at_any_scale, best_score
         
     except Exception as e:
-        print(f"Error in template-based Fish_On_Hook detection: {e}")
+        debug_log(LogCategory.ERROR, f"Error in template-based Fish_On_Hook detection: {e}")
         # Fallback to color-based detection if template fails
         return _detect_exclamation_indicator_fallback(region)
 
@@ -527,12 +537,10 @@ def _detect_red_exclamation_simple(region):
     Emergency fallback when template matching completely fails.
     """
     try:
-        import pyautogui
-        import numpy as np
-        
-        # Take screenshot of region
-        screenshot = pyautogui.screenshot(region=region)
-        screenshot_np = np.array(screenshot)
+        screenshot_img = _capture_region(region)
+        if screenshot_img is None:
+            return False, 0.0
+        screenshot_np = np.array(screenshot_img)
         screenshot_bgr = cv2.cvtColor(screenshot_np, cv2.COLOR_RGB2BGR)
         
         # Convert to HSV for better color detection
@@ -553,13 +561,13 @@ def _detect_red_exclamation_simple(region):
         # Simple threshold - if we have enough red pixels, likely an exclamation
         if red_pixels > 30:  # Lowered from 50 - user has 86 pixels detected
             confidence = min(red_pixels / 300.0, 1.0)  # Adjusted scaling
-            print(f"🔍 Simple color detection: {red_pixels} red pixels, confidence: {confidence:.3f}")
+            debug_log(LogCategory.FISH_DETECTION, f"🔍 Simple color detection: {red_pixels} red pixels, confidence: {confidence:.3f}")
             return red_pixels > 60, confidence  # Lowered from 100 to 60 for detection
         
         return False, 0.0
         
     except Exception as e:
-        print(f"Error in simple color detection: {e}")
+        debug_log(LogCategory.ERROR, f"Error in simple color detection: {e}")
         return False, 0.0
 
 
@@ -689,12 +697,12 @@ def _detect_exclamation_indicator_fallback(region):
                 (exclamation_score > 0.6 and total_colored_pixels > 20 and total_colored_pixels < 500)
         
         if found:
-            print(f"🐟 EXCLAMATION DETECTED! Colors:{total_colored_pixels}, Edges:{edge_pixels}, Shape:{exclamation_score:.2f}")
+            debug_log(LogCategory.FISH_DETECTION, f"🐟 EXCLAMATION DETECTED! Colors:{total_colored_pixels}, Edges:{edge_pixels}, Shape:{exclamation_score:.2f}")
         
         return found, confidence
         
     except Exception as e:
-        print(f"Error in exclamation detection: {e}")
+        debug_log(LogCategory.ERROR, f"Error in exclamation detection: {e}")
         return False, 0.0
 
 def _fish_on_hook_fallback():
@@ -707,7 +715,7 @@ def _fish_on_hook_fallback():
         return False
         
     except Exception as e:
-        print(f"Error in fallback Fish_On_Hook detection: {e}")
+        debug_log(LogCategory.ERROR, f"Error in fallback Fish_On_Hook detection: {e}")
         return False
 
 def _detect_fish_enhanced(region):
@@ -748,23 +756,23 @@ def Fish_On_Hook(x, y, duration=0.011):
     fish_region_width = fish_region_right - fish_region_left
     fish_region_height = fish_region_bottom - fish_region_top
     
-    print(f"🔍 Fish detection region: ({fish_region_left}, {fish_region_top}) to ({fish_region_right}, {fish_region_bottom})")
-    print(f"🔍 Region size: {fish_region_width}x{fish_region_height}")
+    debug_log(LogCategory.FISH_DETECTION, f"🔍 Fish detection region: ({fish_region_left}, {fish_region_top}) to ({fish_region_right}, {fish_region_bottom})")
+    debug_log(LogCategory.FISH_DETECTION, f"🔍 Region size: {fish_region_width}x{fish_region_height}")
     
     # Create region tuple (left, top, width, height) for screenshot
     region = (fish_region_left, fish_region_top, fish_region_width, fish_region_height)
     
     # Enhanced detection method: Reduces false positives from event island red water
     found, confidence, method = _detect_fish_enhanced(region)
-    print(f"🔍 Enhanced fish detection: found={found}, confidence={confidence:.3f}, method={method}")
+    debug_log(LogCategory.FISH_DETECTION, f"🔍 Enhanced fish detection: found={found}, confidence={confidence:.3f}, method={method}")
     
     # Log detailed detection info for debugging event island issues
     if found:
         debug_log(LogCategory.FISH_DETECTION, f"🐟 FISH DETECTED! Method: {method}, Confidence: {confidence:.3f}")
         if method == "context_color":
-            print("⚠️ WARNING: Color-based detection used - may be affected by event island red water")
+            debug_log(LogCategory.FISH_DETECTION, "⚠️ WARNING: Color-based detection used - may be affected by event island red water")
         elif method in ["template", "shape"]:
-            print("✅ RELIABLE: Shape/template detection used - event island resistant")
+            debug_log(LogCategory.FISH_DETECTION, "✅ RELIABLE: Shape/template detection used - event island resistant")
 
     # CRITICAL CHANGE: Only return detection result, don't start minigame
     # Minigame clicking is now handled separately for better verification
@@ -790,19 +798,18 @@ def _verify_fish_on_hook_template():
         
         # Use template detection with HIGH threshold only
         found, confidence = _detect_fish_on_hook_template(region)
-        
-        print(f"🔍 Template verification: found={found}, confidence={confidence:.3f}")
+        debug_log(LogCategory.FISH_DETECTION, f"🔍 Template verification: found={found}, confidence={confidence:.3f}")
         
         # Require HIGH confidence (0.75+) for verification
         if found and confidence >= 0.75:
-            print(f"✅ High-confidence template verification passed!")
+            debug_log(LogCategory.FISH_DETECTION, "✅ High-confidence template verification passed!")
             return True
         else:
-            print(f"❌ Template verification failed - confidence too low")
+            debug_log(LogCategory.FISH_DETECTION, "❌ Template verification failed - confidence too low")
             return False
             
     except Exception as e:
-        print(f"❌ Template verification error: {e}")
+        debug_log(LogCategory.ERROR, f"❌ Template verification error: {e}")
         return False
 
 def _start_minigame_clicks():
@@ -816,29 +823,29 @@ def _start_minigame_clicks():
     """
     try:
         # CRITICAL: Enhanced window focus using AHK-style methods (Reddit solution)
-        print("🎯 [AHK-STYLE] Ensuring aggressive window focus before minigame clicks...")
+        debug_log(LogCategory.MINIGAME, "🎯 [AHK-STYLE] Ensuring aggressive window focus before minigame clicks...")
         if not (WINDOW_MANAGER_AVAILABLE and ensure_roblox_focused()):
-            print("❌ Critical: Cannot ensure window focus - minigame may fail!")
+            debug_log(LogCategory.MINIGAME, "❌ Critical: Cannot ensure window focus - minigame may fail!")
             return False
         
         # Get click position - ONLY use Roblox window center
         click_x, click_y = get_roblox_coordinates()
         if click_x is None or click_y is None:
-            print("ERROR: Cannot get Roblox coordinates for minigame click!")
+            debug_log(LogCategory.MINIGAME, "ERROR: Cannot get Roblox coordinates for minigame click!")
             return False
         
-        print(f"🎯 Starting minigame clicks at Roblox center ({click_x}, {click_y})")
+        debug_log(LogCategory.MINIGAME, f"🎯 Starting minigame clicks at Roblox center ({click_x}, {click_y})")
         
         # Use virtual mouse for minigame start if available (with ultimate stealth)
         if is_virtual_mouse_available():
-            print(f"�️ [ULTRA-STEALTH] PostMessage stealth clicking at ({click_x}, {click_y})")
+            debug_log(LogCategory.MINIGAME, f"🕵️ [ULTRA-STEALTH] PostMessage stealth clicking at ({click_x}, {click_y})")
             
             # First click using ultimate stealth method (PostMessage if possible)
             click_success1 = virtual_mouse.ultimate_stealth_click(click_x, click_y)
             if click_success1:
-                print("🛡️ [ULTRA-STEALTH] PostMessage first click completed")
+                debug_log(LogCategory.MINIGAME, "🛡️ [ULTRA-STEALTH] PostMessage first click completed")
             else:
-                print("🛡️ [ULTRA-STEALTH] Enhanced first click completed")
+                debug_log(LogCategory.MINIGAME, "🛡️ [ULTRA-STEALTH] Enhanced first click completed")
             
             # Brief delay between clicks for Roblox processing
             time.sleep(0.1)
@@ -846,16 +853,16 @@ def _start_minigame_clicks():
             # Second click to ensure minigame starts (with stealth re-verification)
             click_success2 = virtual_mouse.ultimate_stealth_click(click_x, click_y)
             if click_success2:
-                print("🛡️ [ULTRA-STEALTH] PostMessage second click completed")
+                debug_log(LogCategory.MINIGAME, "🛡️ [ULTRA-STEALTH] PostMessage second click completed")
             else:
-                print("🛡️ [ULTRA-STEALTH] Enhanced second click completed")
-            
-            print("🛡️ [ULTRA-STEALTH] PostMessage minigame clicks completed - bypassing anti-cheat!")
+                debug_log(LogCategory.MINIGAME, "🛡️ [ULTRA-STEALTH] Enhanced second click completed")
+
+            debug_log(LogCategory.MINIGAME, "🛡️ [ULTRA-STEALTH] PostMessage minigame clicks completed - bypassing anti-cheat!")
             return True
                 
         else:
             # Fallback to Windows API for mouse input
-            print("Using Windows API fallback for minigame clicks")
+            debug_log(LogCategory.MINIGAME, "Using Windows API fallback for minigame clicks")
             try:
                 import ctypes
                 user32 = ctypes.windll.user32
@@ -886,15 +893,15 @@ def _start_minigame_clicks():
                 time.sleep(0.05)
                 user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
                 
-                print("🎮 Windows API minigame clicks completed!")
+                debug_log(LogCategory.MINIGAME, "🎮 Windows API minigame clicks completed!")
                 return True
                 
             except Exception as e:
-                print(f"❌ Windows API fallback failed: {e}")
+                debug_log(LogCategory.ERROR, f"❌ Windows API fallback failed: {e}")
                 return False
             
     except Exception as e:
-        print(f"❌ Minigame click error: {e}")
+        debug_log(LogCategory.ERROR, f"❌ Minigame click error: {e}")
         return False
 
 
@@ -1352,10 +1359,10 @@ def execute_minigame_action(decision):
                 time.sleep(duration_factor)      # Wait duration
                 virtual_mouse.mouse_down(click_x, click_y, 'left')  # Mouse down for counter-strafe
                 time.sleep(counter_strafe)       # Counter-strafe duration
-            elif PYAUTOGUI_AVAILABLE and pyautogui is not None:
-                pyautogui.mouseUp(click_x, click_y, button='left')
+            else:
+                fallback_mouse_action(click_x, click_y, "up")
                 time.sleep(duration_factor)
-                pyautogui.mouseDown(click_x, click_y, button='left')
+                fallback_mouse_action(click_x, click_y, "down")
                 time.sleep(counter_strafe)
                 
         elif action_type == 2:  # Stable right tracking  
@@ -1364,26 +1371,26 @@ def execute_minigame_action(decision):
                 time.sleep(duration_factor)      # Wait duration
                 virtual_mouse.mouse_up(click_x, click_y, 'left')    # Mouse up for counter-strafe
                 time.sleep(counter_strafe)       # Counter-strafe duration
-            elif PYAUTOGUI_AVAILABLE and pyautogui is not None:
-                pyautogui.mouseDown(click_x, click_y, button='left')
+            else:
+                fallback_mouse_action(click_x, click_y, "down")
                 time.sleep(duration_factor)
-                pyautogui.mouseUp(click_x, click_y, button='left')
+                fallback_mouse_action(click_x, click_y, "up")
                 time.sleep(counter_strafe)
                 
         elif action_type == 3:  # Max left boundary
             if is_virtual_mouse_available():
                 virtual_mouse.mouse_up(click_x, click_y, 'left')    # Force mouse up (move left)
                 time.sleep(duration_factor)      # Side delay
-            elif PYAUTOGUI_AVAILABLE and pyautogui is not None:
-                pyautogui.mouseUp(click_x, click_y, button='left')
+            else:
+                fallback_mouse_action(click_x, click_y, "up")
                 time.sleep(duration_factor)
                 
         elif action_type == 4:  # Max right boundary
             if is_virtual_mouse_available():
                 virtual_mouse.mouse_down(click_x, click_y, 'left')  # Force mouse down (move right)
                 time.sleep(duration_factor)      # Side delay
-            elif PYAUTOGUI_AVAILABLE and pyautogui is not None:
-                pyautogui.mouseDown(click_x, click_y, button='left')
+            else:
+                fallback_mouse_action(click_x, click_y, "down")
                 time.sleep(duration_factor)
                 
         elif action_type == 5:  # Unstable left (aggressive)
@@ -1392,10 +1399,10 @@ def execute_minigame_action(decision):
                 time.sleep(duration_factor)      # Aggressive duration
                 virtual_mouse.mouse_down(click_x, click_y, 'left')  # Mouse down for counter-strafe
                 time.sleep(counter_strafe)       # Counter-strafe duration
-            elif PYAUTOGUI_AVAILABLE and pyautogui is not None:
-                pyautogui.mouseUp(click_x, click_y, button='left')
+            else:
+                fallback_mouse_action(click_x, click_y, "up")
                 time.sleep(duration_factor)
-                pyautogui.mouseDown(click_x, click_y, button='left') 
+                fallback_mouse_action(click_x, click_y, "down")
                 time.sleep(counter_strafe)
                 
         elif action_type == 6:  # Unstable right (aggressive)
@@ -1404,10 +1411,10 @@ def execute_minigame_action(decision):
                 time.sleep(duration_factor)      # Aggressive duration
                 virtual_mouse.mouse_up(click_x, click_y, 'left')    # Mouse up for counter-strafe
                 time.sleep(counter_strafe)       # Counter-strafe duration
-            elif PYAUTOGUI_AVAILABLE and pyautogui is not None:
-                pyautogui.mouseDown(click_x, click_y, button='left')
+            else:
+                fallback_mouse_action(click_x, click_y, "down")
                 time.sleep(duration_factor)
-                pyautogui.mouseUp(click_x, click_y, button='left')
+                fallback_mouse_action(click_x, click_y, "up")
                 time.sleep(counter_strafe)
                 
     except Exception as e:
