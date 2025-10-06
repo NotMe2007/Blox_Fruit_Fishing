@@ -550,17 +550,17 @@ class LauncherApp(_BaseLauncher):
         entry.pack(side="right", padx=(10, 0))
         entry.insert(0, str(self.minigame_settings.get(key, default_value)))
 
-    # Prevent non-numeric characters from being entered
-    validation_cmd = (self.register(self._validate_numeric_input), "%P", "%S")
-    self._configure_numeric_validation(entry, validation_cmd)
-        
+        # Prevent non-numeric characters from being entered
+        validation_cmd = (self.register(self._validate_numeric_input), "%P", "%S")
+        self._configure_numeric_validation(entry, validation_cmd)
+
         # Bind focus events for typing detection, change tracking, and validation
         entry.bind('<FocusIn>', self._on_entry_focus_in)
         entry.bind('<FocusOut>', self._on_entry_focus_out)
         entry.bind('<KeyRelease>', self._on_entry_change)
-        
+
         self.minigame_entries[key] = entry
-        
+
         # Initial validation
         self.after(100, lambda e=entry: self._validate_minigame_entry(e))
 
@@ -759,17 +759,17 @@ class LauncherApp(_BaseLauncher):
         entry.pack(side="right", padx=(10, 0))
         entry.insert(0, str(self.minigame_settings.get(key, default_value)))
 
-    # Prevent non-numeric characters from being entered
-    validation_cmd = (self.register(self._validate_numeric_input), "%P", "%S")
-    self._configure_numeric_validation(entry, validation_cmd)
-        
+        # Prevent non-numeric characters from being entered
+        validation_cmd = (self.register(self._validate_numeric_input), "%P", "%S")
+        self._configure_numeric_validation(entry, validation_cmd)
+
         # Bind focus events for typing detection, change tracking, and validation
         entry.bind('<FocusIn>', self._on_entry_focus_in)
         entry.bind('<FocusOut>', self._on_entry_focus_out)
         entry.bind('<KeyRelease>', self._on_entry_change)
-        
+
         self.minigame_entries[key] = entry
-        
+
         # Initial validation
         self.after(100, lambda e=entry: self._validate_minigame_entry(e))
 

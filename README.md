@@ -27,6 +27,24 @@ Note out yet still working on the project, fishing ~95% done today
 
 ## How to run the Launcher
 
-1. Open the Run_Me.bat
+1. (Recommended) Run the new Python launcher:
+
+```powershell
+python Launcher.py
+```
+
+The launcher handles update checks, dependency installation, quick tests, and starts the GUI.
+2. Legacy option: double-click `Run_Me.bat` if you still prefer the batch workflow.
+
+## Building a standalone Launcher.exe
+
+You can ship an `.exe` version of the launcher using [PyInstaller](https://pyinstaller.org/).
+
+```powershell
+python -m pip install pyinstaller
+pyinstaller --onefile Launcher.py
+```
+
+The resulting executable will be created in `dist/Launcher.exe`. Distribute that file together with the project folder so the launcher can access scripts, images, and configuration files.
 
 If you have any ideas, feel free to drop them to me on Discord: [https://discord.gg/dHUM2ejQGY](https://discord.gg/dHUM2ejQGY)
