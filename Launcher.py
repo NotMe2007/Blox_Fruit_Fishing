@@ -24,6 +24,7 @@ DEFAULT_REQUIREMENTS = [
     "opencv-python",
     "psutil",
     "pywin32; platform_system == 'Windows'",
+    "keyboard",
     "requests",
 ]
 

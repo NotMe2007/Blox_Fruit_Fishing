@@ -149,53 +149,7 @@ except ImportError:
 
 
 # ============================================================================
-# WINDOW MANAGER - PRIMARY IMPORT WITH FALLBACK
-# ============================================================================
-
-WINDOW_MANAGER_AVAILABLE = False
-roblox_window_manager = None  # type: ignore
-get_roblox_coordinates = None  # type: ignore
-get_roblox_window_region = None  # type: ignore
-ensure_roblox_focused = None  # type: ignore
-
-try:
-    from .Window_Manager import (  # type: ignore
-        RobloxWindowManager, 
-        get_roblox_coordinates,  # type: ignore
-        get_roblox_window_region,  # type: ignore
-        ensure_roblox_focused  # type: ignore
-    )
-    roblox_window_manager = RobloxWindowManager()
-    WINDOW_MANAGER_AVAILABLE = True
-except ImportError:
-    try:
-        from Window_Manager import (  # type: ignore
-            RobloxWindowManager, 
-            get_roblox_coordinates,  # type: ignore
-            get_roblox_window_region,  # type: ignore
-            ensure_roblox_focused  # type: ignore
-        )
-        roblox_window_manager = RobloxWindowManager()
-        WINDOW_MANAGER_AVAILABLE = True
-    except ImportError:
-        WINDOW_MANAGER_AVAILABLE = False
-        
-        # Fallback dummy functions
-        def get_roblox_coordinates():  # type: ignore
-            """Fallback function when Window_Manager not available"""
-            return None, None
-        
-        def get_roblox_window_region():  # type: ignore
-            """Fallback function when Window_Manager not available"""
-            return None
-        
-        def ensure_roblox_focused():  # type: ignore
-            """Fallback function when Window_Manager not available"""
-            return False
-
-
-# ============================================================================
-# HELPER FUNCTIONS
+# HELPER FUNCTIONS (DEFINED BEFORE WINDOW MANAGER IMPORT)
 # ============================================================================
 
 def is_virtual_mouse_available() -> bool:
@@ -211,6 +165,52 @@ def is_virtual_keyboard_available() -> bool:
 def is_screen_capture_available() -> bool:
     """Check if screen capture is available."""
     return SCREEN_CAPTURE_AVAILABLE and screenshot is not None
+
+
+# ============================================================================
+# WINDOW MANAGER - PRIMARY IMPORT WITH FALLBACK
+# ============================================================================
+
+WINDOW_MANAGER_AVAILABLE = False
+roblox_window_manager = None  # type: ignore
+get_roblox_coordinates = None  # type: ignore
+get_roblox_window_region = None  # type: ignore
+ensure_roblox_focused = None  # type: ignore
+
+try:
+    from .Window_Manager import (  # type: ignore
+        RobloxWindowManager,
+        get_roblox_coordinates,  # type: ignore
+        get_roblox_window_region,  # type: ignore
+        ensure_roblox_focused  # type: ignore
+    )
+    roblox_window_manager = RobloxWindowManager()
+    WINDOW_MANAGER_AVAILABLE = True
+except ImportError:
+    try:
+        from Window_Manager import (  # type: ignore
+            RobloxWindowManager,
+            get_roblox_coordinates,  # type: ignore
+            get_roblox_window_region,  # type: ignore
+            ensure_roblox_focused  # type: ignore
+        )
+        roblox_window_manager = RobloxWindowManager()
+        WINDOW_MANAGER_AVAILABLE = True
+    except ImportError:
+        WINDOW_MANAGER_AVAILABLE = False
+
+        # Fallback dummy functions
+        def get_roblox_coordinates():  # type: ignore
+            """Fallback function when Window_Manager not available"""
+            return None, None
+
+        def get_roblox_window_region():  # type: ignore
+            """Fallback function when Window_Manager not available"""
+            return None
+
+        def ensure_roblox_focused():  # type: ignore
+            """Fallback function when Window_Manager not available"""
+            return False
 
 
 def is_window_manager_available() -> bool:
