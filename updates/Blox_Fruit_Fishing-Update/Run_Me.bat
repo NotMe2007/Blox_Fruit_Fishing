@@ -24,9 +24,6 @@ cd /d "%~dp0"
 :: Create a simple backup of this script before modifying behavior
 if not exist "Run_Me.bat.bak" copy "%~f0" "Run_Me.bat.bak" >nul 2>&1
 
-:: Check if a newer release is available before continuing the setup
-call :CHECK_FOR_UPDATES
-
 :: =============================================================================
 :: STEP 1: CHECK PYTHON INSTALLATION
 :: =============================================================================
@@ -240,9 +237,8 @@ echo 1. Make sure Roblox is running
 echo 2. Join Blox Fruits game
 echo 3. Go to a fishing area
 echo 4. Use numpad keys to control the bot:
-echo    - Numpad 1: Start fishing (default)
-echo    - Numpad 2: Stop/Exit (default)
-echo    - Adjust these hotkeys in the launcher under the "Hotkeys" tab if needed
+echo    - Numpad 1: Start fishing
+echo    - Numpad 0: Stop/Exit
 echo.
 echo Starting GUI...
 
@@ -263,115 +259,6 @@ echo.
 echo Application closed normally
 pause
 exit /b 0
-
-:: =============================================================================
-:: SUBROUTINE: CHECK_FOR_UPDATES
-:: =============================================================================
-:CHECK_FOR_UPDATES
-echo.
-echo [STEP 0] Checking for updates...
-
-set "REPO_OWNER=NotMe2007"
-set "REPO_NAME=Blox_Fruit_Fishing"
-set "VERSION_FILE=version.txt"
-set "UPDATES_DIR=updates"
-
-set "LOCAL_VERSION="
-if exist "%VERSION_FILE%" (
-    set /p LOCAL_VERSION=<"%VERSION_FILE%"
-)
-if not defined LOCAL_VERSION set "LOCAL_VERSION=unknown"
-
-set "LATEST_VERSION="
-set "LATEST_IS_PRERELEASE="
-set "UPDATE_TMP=%TEMP%\bff_release.cmd"
-
-del "%UPDATE_TMP%" >nul 2>&1
-powershell -NoProfile -Command "$ErrorActionPreference='SilentlyContinue'; $headers=@{'User-Agent'='BloxFruitUpdater'}; $release=Invoke-RestMethod -UseBasicParsing -Headers $headers -Uri 'https://api.github.com/repos/%REPO_OWNER%/%REPO_NAME%/releases/latest'; if(-not $release){ $releases=Invoke-RestMethod -UseBasicParsing -Headers $headers -Uri 'https://api.github.com/repos/%REPO_OWNER%/%REPO_NAME%/releases?per_page=1'; if($releases){ if($releases -is [System.Collections.IEnumerable]){ $release=$releases | Select-Object -First 1 } else { $release=$releases } } }; if($release){ 'set LATEST_VERSION='+$release.tag_name; 'set LATEST_IS_PRERELEASE='+[string]$release.prerelease }" > "%UPDATE_TMP%"
-
-if exist "%UPDATE_TMP%" (
-    call "%UPDATE_TMP%"
-    del "%UPDATE_TMP%" >nul 2>&1
-)
-
-if not defined LATEST_VERSION (
-    echo ⚠️  Could not reach GitHub releases. Skipping update check.
-    goto :EOF
-)
-
-echo    Local version: !LOCAL_VERSION!
-echo    Latest release: !LATEST_VERSION!
-if /I "!LATEST_IS_PRERELEASE!"=="True" (
-    echo    Release type: pre-release
-)
-
-if /I "!LOCAL_VERSION!"=="!LATEST_VERSION!" goto :UPDATE_ALREADY_LATEST
-
-echo ⚠️  Update available! Local version: !LOCAL_VERSION!  Latest version: !LATEST_VERSION!
-if /I "!LATEST_IS_PRERELEASE!"=="True" (
-    echo 📎 Note: This release is marked as a pre-release on GitHub.
-)
-
-if not exist "%UPDATES_DIR%" mkdir "%UPDATES_DIR%" >nul 2>&1
-
-set "UPDATE_ARCHIVE=%UPDATES_DIR%\%REPO_NAME%_%LATEST_VERSION%.zip"
-set "DOWNLOAD_URL=https://github.com/%REPO_OWNER%/%REPO_NAME%/archive/refs/tags/%LATEST_VERSION%.zip"
-
-if exist "%UPDATE_ARCHIVE%" del "%UPDATE_ARCHIVE%" >nul 2>&1
-
-powershell -NoProfile -Command "try { Invoke-WebRequest -UseBasicParsing -Headers @{ 'User-Agent' = 'BloxFruitUpdater' } -Uri '%DOWNLOAD_URL%' -OutFile '%UPDATE_ARCHIVE%' } catch { exit 1 }"
-if errorlevel 1 (
-    echo ❌ Failed to download the latest release. Continuing without updating.
-    if exist "%UPDATE_ARCHIVE%" del "%UPDATE_ARCHIVE%" >nul 2>&1
-    goto :EOF
-)
-
-echo ✅ Download complete. Extracting package...
-
-set "EXTRACTED_FOLDER=%UPDATES_DIR%\%REPO_NAME%-%LATEST_VERSION%"
-if exist "%EXTRACTED_FOLDER%" rd /s /q "%EXTRACTED_FOLDER%" >nul 2>&1
-
-powershell -NoProfile -Command "try { Expand-Archive -LiteralPath '%UPDATE_ARCHIVE%' -DestinationPath '%UPDATES_DIR%' -Force } catch { exit 1 }"
-if errorlevel 1 (
-    echo ❌ Failed to extract the update package. Continuing without updating.
-    del "%UPDATE_ARCHIVE%" >nul 2>&1
-    goto :EOF
-)
-
-echo.
-echo 📁 Latest version extracted to: %EXTRACTED_FOLDER%
-echo.
-set "TEST_DECISION="
-set /p "TEST_DECISION=Would you like to test the new version before replacing the current install? (Y/N): "
-if /I "%TEST_DECISION%"=="Y" (
-    echo ✅ Keeping current installation. Test the update by running Run_Me.bat inside:
-    echo    %EXTRACTED_FOLDER%
-    echo Once satisfied, rerun this launcher to apply the update.
-    del "%UPDATE_ARCHIVE%" >nul 2>&1
-    goto :EOF
-)
-
-echo 🔄 Replacing current installation with version %LATEST_VERSION%...
-
-robocopy "%EXTRACTED_FOLDER%" "%CD%" /E /R:1 /W:1 /NFL /NDL /NJH /NJS /NP /XD ".git" "%UPDATES_DIR%"
-set "ROBO_EXIT=%ERRORLEVEL%"
-if %ROBO_EXIT% GEQ 8 (
-    echo ❌ Robocopy reported an error (code %ROBO_EXIT%). Update aborted.
-    goto :EOF
-)
-
-echo %LATEST_VERSION%>"%VERSION_FILE%"
-echo ✅ Update applied successfully.
-
-if exist "%UPDATE_ARCHIVE%" del "%UPDATE_ARCHIVE%" >nul 2>&1
-if exist "%EXTRACTED_FOLDER%" rd /s /q "%EXTRACTED_FOLDER%" >nul 2>&1
-
-echo ℹ️  The launcher will now continue using the updated files.
-goto :EOF
-
-:UPDATE_ALREADY_LATEST
-echo ✅ You already have the latest version (!LOCAL_VERSION!).
-goto :EOF
 
 :: =============================================================================
 :: SUPPORT CONTACT SECTION

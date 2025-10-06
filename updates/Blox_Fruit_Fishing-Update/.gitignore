@@ -1,0 +1,18 @@
+# Debug files and folders
+debug/
+debug_*.png
+fish_detection_*.png
+
+# Test files
+demo_enhanced_features.py
+test_improved_detection.py
+test_api_updates.py
+test_roblox_checker.py
+test_integration.py
+
+# AI instructions now tracked for development guidance
+# .github/copilot-instructions.md
+FischV12.ahk
+ANTI_DETECTION_GUIDE.md
+Run_Me.bat.bak
+.github/copilot-instructions.md

@@ -549,10 +549,6 @@ class LauncherApp(_BaseLauncher):
         entry = ctk.CTkEntry(entry_frame, width=100, placeholder_text=placeholder_text)
         entry.pack(side="right", padx=(10, 0))
         entry.insert(0, str(self.minigame_settings.get(key, default_value)))
-
-    # Prevent non-numeric characters from being entered
-    validation_cmd = (self.register(self._validate_numeric_input), "%P", "%S")
-    self._configure_numeric_validation(entry, validation_cmd)
         
         # Bind focus events for typing detection, change tracking, and validation
         entry.bind('<FocusIn>', self._on_entry_focus_in)
@@ -758,10 +754,6 @@ class LauncherApp(_BaseLauncher):
         entry = tk.Entry(entry_frame, width=12)
         entry.pack(side="right", padx=(10, 0))
         entry.insert(0, str(self.minigame_settings.get(key, default_value)))
-
-    # Prevent non-numeric characters from being entered
-    validation_cmd = (self.register(self._validate_numeric_input), "%P", "%S")
-    self._configure_numeric_validation(entry, validation_cmd)
         
         # Bind focus events for typing detection, change tracking, and validation
         entry.bind('<FocusIn>', self._on_entry_focus_in)
@@ -1116,43 +1108,6 @@ class LauncherApp(_BaseLauncher):
                         
         except Exception as e:
             debug_log(LogCategory.ERROR, f"Error validating hotkey: {e}")
-
-    def _configure_numeric_validation(self, entry_widget, validate_tuple):
-        """Attach numeric-only validation to an entry widget, including CTk wrappers."""
-        for setter_name in ("configure", "config"):
-            try:
-                getattr(entry_widget, setter_name)(validate="key", validatecommand=validate_tuple)
-                return
-            except (tk.TclError, AttributeError):
-                continue
-
-        # Handle CustomTkinter entries that wrap the underlying tkinter.Entry
-        internal_entry = getattr(entry_widget, "_entry", None) or getattr(entry_widget, "entry", None)
-        if internal_entry is not None:
-            for setter_name in ("configure", "config"):
-                try:
-                    getattr(internal_entry, setter_name)(validate="key", validatecommand=validate_tuple)
-                    return
-                except tk.TclError:
-                    continue
-
-    def _validate_numeric_input(self, proposed_value: str, inserted_text: str) -> bool:
-        """Return True only when the proposed text represents numeric input."""
-        if inserted_text == "":
-            # Allow deletions
-            return True
-
-        allowed_chars = {"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "."}
-        if any(ch not in allowed_chars for ch in inserted_text):
-            self.bell()
-            return False
-
-        # Ensure at most one decimal point overall
-        if proposed_value.count('.') > 1:
-            self.bell()
-            return False
-
-        return True
 
     def _validate_minigame_entry(self, entry_widget):
         """Validate a minigame entry and update its color."""
