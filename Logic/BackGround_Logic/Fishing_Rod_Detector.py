@@ -7,27 +7,33 @@ import math
 import win32gui
 from pathlib import Path
 import importlib.util
+from typing import Literal, Optional, Tuple
 
 # Import from centralized Import_Utils
 try:
     from .Import_Utils import (  # type: ignore
         virtual_mouse, VIRTUAL_MOUSE_AVAILABLE, is_virtual_mouse_available,
-        screenshot, SCREEN_CAPTURE_AVAILABLE
+        screenshot, SCREEN_CAPTURE_AVAILABLE,
+        get_roblox_window_region, WINDOW_MANAGER_AVAILABLE
     )
 except ImportError:
     try:
         from Import_Utils import (  # type: ignore
             virtual_mouse, VIRTUAL_MOUSE_AVAILABLE, is_virtual_mouse_available,
-            screenshot, SCREEN_CAPTURE_AVAILABLE
+            screenshot, SCREEN_CAPTURE_AVAILABLE,
+            get_roblox_window_region, WINDOW_MANAGER_AVAILABLE
         )
     except ImportError:
         # Final fallback if Import_Utils not available
         virtual_mouse = None  # type: ignore
         VIRTUAL_MOUSE_AVAILABLE = False
-        def is_virtual_mouse_available():  # type: ignore
+        def is_virtual_mouse_available() -> Literal[False]:  # type: ignore
             return False
         screenshot = None  # type: ignore
         SCREEN_CAPTURE_AVAILABLE = False
+        WINDOW_MANAGER_AVAILABLE = False
+        def get_roblox_window_region() -> Optional[Tuple[int, int, int, int]]:  # type: ignore
+            return None
 
 
 # Cache for detector module to prevent reloading
@@ -158,7 +164,7 @@ def smooth_move_to(target_x, target_y, duration=None):
 IMAGES_DIR = Path(__file__).parent.parent.parent / 'Images'
 UN_PATH = IMAGES_DIR / 'Basic_Fishing_UN.png'
 EQ_PATH = IMAGES_DIR / 'Basic_Fishing_EQ.png'
-# Region to check: top-left and bottom-right (inclusive)
+# Region to check within the Roblox window: top-left and bottom-right offsets (inclusive)
 TOP_LEFT = (725, 1004)
 BOTTOM_RIGHT = (1189, 1072)
 threshold = 0.50   # matching threshold (0-1). Increased from 35% to 50% for better accuracy
@@ -345,37 +351,48 @@ def check_region_and_act():
         return None
 
     try:
-        left = max(0, TOP_LEFT[0])
-        top = max(0, TOP_LEFT[1])
-        # Get screen dimensions using Windows API
+        base_left = 0
+        base_top = 0
+
+        if WINDOW_MANAGER_AVAILABLE and get_roblox_window_region is not None:
+            window_region = get_roblox_window_region()
+            if window_region:
+                win_left, win_top, _, _ = window_region
+                base_left = int(win_left)
+                base_top = int(win_top)
+
+        left = max(0, base_left + TOP_LEFT[0])
+        top = max(0, base_top + TOP_LEFT[1])
+
         try:
             import ctypes
             user32 = ctypes.windll.user32
-            screen_w = user32.GetSystemMetrics(0)  # SM_CXSCREEN
-            screen_h = user32.GetSystemMetrics(1)  # SM_CYSCREEN
+            screen_w = user32.GetSystemMetrics(0)
+            screen_h = user32.GetSystemMetrics(1)
         except Exception:
-            screen_w, screen_h = 1920, 1080  # Fallback
-        right = min(screen_w, BOTTOM_RIGHT[0])
-        bottom = min(screen_h, BOTTOM_RIGHT[1])
+            screen_w, screen_h = 1920, 1080  # Sensible fallback for single-monitor setups
+
+        right = min(screen_w, base_left + BOTTOM_RIGHT[0])
+        bottom = min(screen_h, base_top + BOTTOM_RIGHT[1])
         w = max(1, right - left)
         h = max(1, bottom - top)
         region = (left, top, w, h)
 
         time.sleep(0.05)
-        # Use Windows API screen capture
+
         try:
             from .Screen_Capture import screenshot
             pil_img = screenshot(region=region)
             if pil_img is None:
-                raise Exception("Screen capture failed")
-        except:
-            # Final fallback - try to use PIL directly
+                raise RuntimeError("Screen capture failed")
+        except Exception:
             try:
                 from PIL import ImageGrab
                 pil_img = ImageGrab.grab(bbox=region)
             except Exception as e:
                 print(f"Screenshot capture failed: {e}")
                 return False, 0.0
+
         screenshot = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
         screenshot_gray = cv2.cvtColor(screenshot, cv2.COLOR_BGR2GRAY)
     except Exception as e:
