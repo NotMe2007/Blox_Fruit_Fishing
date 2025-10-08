@@ -6,7 +6,7 @@ Automate fishing and other repetitive tasks in Roblox Blox Fruits with a desktop
 
 ## ✨ Current Capabilities
 
-- **Auto Fishing (GUI first)** – Core minigame logic is ~95% complete and works best with the included templates.
+- **Auto Fishing (GUI first)** – Core minigame logic is ~98% complete and works best with the included templates.
 - **Enhanced Fish Detection** – Uses OpenCV template matching with adaptive resizing for better accuracy.
 - **Hotkey Controls** – Default numpad bindings (1 = start, 2 = stop) with in-app customization.
 - **Diagnostics & Logging** – `tests/quick_test.py` validates critical modules before launch.
