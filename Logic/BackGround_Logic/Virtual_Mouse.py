@@ -331,41 +331,18 @@ class VirtualMouse:
         """
         try:
             # Try to get Roblox window handle for stealth clicking
-            if WIN32_AVAILABLE:
-                try:
-                    from .Window_Manager import get_roblox_hwnd
-                    hwnd = get_roblox_hwnd()
-                    
-                    if hwnd:
-                        debug_log(LogCategory.MOUSE, f"🎯 [ULTIMATE-STEALTH] Using PostMessage stealth click")
-                        
-                        # Convert screen coordinates to window-relative coordinates
-                        # For PostMessage, we need coordinates relative to the window client area
-                        import win32gui
-                        window_rect = win32gui.GetWindowRect(hwnd)
-                        client_rect = win32gui.GetClientRect(hwnd)
-                        
-                        # Calculate the offset for window borders/title bar
-                        border_x = (window_rect[2] - window_rect[0] - client_rect[2]) // 2
-                        title_height = window_rect[3] - window_rect[1] - client_rect[3] - border_x
-                        
-                        # Convert to window-relative coordinates
-                        window_x = x - window_rect[0] - border_x
-                        window_y = y - window_rect[1] - title_height
-                        
-                        # Ensure coordinates are within the client area
-                        window_x = max(0, min(window_x, client_rect[2] - 1))
-                        window_y = max(0, min(window_y, client_rect[3] - 1))
-                        
-                        debug_log(LogCategory.MOUSE, f"🕵️ [ULTIMATE-STEALTH] Screen ({x},{y}) -> Window ({window_x},{window_y})")
-                        
-                        # Use stealth PostMessage clicking
-                        return self.stealth_click_window(hwnd, window_x, window_y, button)
-                        
-                except ImportError:
-                    debug_log(LogCategory.MOUSE, "⚠️ Window Manager not available, using regular enhanced click")
-                except Exception as e:
-                    debug_log(LogCategory.MOUSE, f"⚠️ Stealth click setup failed: {e}, falling back to enhanced click")
+            if WIN32_AVAILABLE and self._resolve_window_manager() and self._get_hwnd_func is not None:
+                hwnd = self._get_hwnd_func()
+                if hwnd:
+                    client_coords = self._screen_to_client(hwnd, x, y)
+                    if client_coords is not None:
+                        client_x, client_y = client_coords
+                        debug_log(LogCategory.MOUSE, f"🎯 [ULTIMATE-STEALTH] Using PostMessage stealth click @ client ({client_x},{client_y})")
+                        if self.stealth_click_window(hwnd, client_x, client_y, button, duration=duration):
+                            return True
+                        debug_log(LogCategory.MOUSE, "⚠️ PostMessage sequence reported failure, falling back to hardware click")
+                else:
+                    debug_log(LogCategory.MOUSE, "⚠️ Roblox window handle unavailable, using enhanced click")
             
             # Fallback to regular enhanced clicking
             debug_log(LogCategory.MOUSE, f"🎯 [ULTIMATE-STEALTH] Using enhanced hardware click as fallback")
@@ -473,7 +450,7 @@ class VirtualMouse:
             debug_log(LogCategory.ERROR, f"❌ Enhanced click failed at ({x}, {y}): {e}")
             return False
     
-    def stealth_click_window(self, hwnd, x: int, y: int, button: str = 'left'):
+    def stealth_click_window(self, hwnd, x: int, y: int, button: str = 'left', *, duration: float = 0.05):
         """
         ULTIMATE STEALTH: PostMessage clicking that bypasses anti-cheat.
         Key insight: Click BEFORE bringing window to front = Undetectable
@@ -493,36 +470,70 @@ class VirtualMouse:
                 debug_log(LogCategory.ERROR, "Win32 API not available for PostMessage clicks")
                 return
             
-            # Add human-like randomization
+            client_rect = win32gui.GetClientRect(hwnd)  # type: ignore
+            client_width = max(1, client_rect[2])
+            client_height = max(1, client_rect[3])
+
+            # Boundary-safe jitter
             jitter_x = random.randint(-2, 2)
             jitter_y = random.randint(-2, 2)
-            final_x = x + jitter_x
-            final_y = y + jitter_y
-            
-            # Create lParam for coordinates (win32api is checked via WIN32_AVAILABLE)
-            lParam = win32api.MAKELONG(final_x, final_y)  # type: ignore
-            
+            base_x = max(0, min(x + jitter_x, client_width - 1))
+            base_y = max(0, min(y + jitter_y, client_height - 1))
+
+            # Generate a brief pre-move path to mimic hover behavior
+            move_steps = random.randint(2, 4)
+            move_points = []
+            for _ in range(move_steps - 1):
+                offset_x = random.randint(-8, 8)
+                offset_y = random.randint(-6, 6)
+                move_points.append((
+                    max(0, min(base_x + offset_x, client_width - 1)),
+                    max(0, min(base_y + offset_y, client_height - 1))
+                ))
+            move_points.append((base_x, base_y))
+
+            # Dispatch WM_MOUSEMOVE trail with subtle timing jitter
+            for idx, (mx, my) in enumerate(move_points):
+                lparam_move = win32api.MAKELONG(mx, my)  # type: ignore
+                win32gui.PostMessage(hwnd, win32con.WM_MOUSEMOVE, 0, lparam_move)  # type: ignore
+                debug_log(LogCategory.MOUSE, f"🕵️ [STEALTH-CLICK] Move {idx+1}/{len(move_points)} -> ({mx},{my})")
+                time.sleep(random.uniform(0.008, 0.025))
+
+            hold_time = max(0.015, duration + random.uniform(-0.02, 0.06))
+            lParam_click = win32api.MAKELONG(base_x, base_y)  # type: ignore
+
             if button == 'left':
-                debug_log(LogCategory.MOUSE, f"🕵️ [STEALTH-CLICK] Background left click via PostMessage")
-                # Send mouse down
-                win32gui.PostMessage(hwnd, win32con.WM_LBUTTONDOWN, win32con.MK_LBUTTON, lParam)  # type: ignore
-                # Human-like click duration
-                time.sleep(random.uniform(0.03, 0.08))
-                # Send mouse up
-                win32gui.PostMessage(hwnd, win32con.WM_LBUTTONUP, 0, lParam)  # type: ignore
-                
+                debug_log(LogCategory.MOUSE, f"🕵️ [STEALTH-CLICK] Background left click via PostMessage (hold {hold_time:.3f}s)")
+                win32gui.PostMessage(hwnd, win32con.WM_LBUTTONDOWN, win32con.MK_LBUTTON, lParam_click)  # type: ignore
+                time.sleep(hold_time)
+                win32gui.PostMessage(hwnd, win32con.WM_LBUTTONUP, 0, lParam_click)  # type: ignore
+
             elif button == 'right':
-                debug_log(LogCategory.MOUSE, f"🕵️ [STEALTH-CLICK] Background right click via PostMessage")
-                # Send mouse down
-                win32gui.PostMessage(hwnd, win32con.WM_RBUTTONDOWN, win32con.MK_RBUTTON, lParam)  # type: ignore
-                # Human-like click duration
-                time.sleep(random.uniform(0.03, 0.08))
-                # Send mouse up
-                win32gui.PostMessage(hwnd, win32con.WM_RBUTTONUP, 0, lParam)  # type: ignore
+                debug_log(LogCategory.MOUSE, f"🕵️ [STEALTH-CLICK] Background right click via PostMessage (hold {hold_time:.3f}s)")
+                win32gui.PostMessage(hwnd, win32con.WM_RBUTTONDOWN, win32con.MK_RBUTTON, lParam_click)  # type: ignore
+                time.sleep(hold_time)
+                win32gui.PostMessage(hwnd, win32con.WM_RBUTTONUP, 0, lParam_click)  # type: ignore
             else:
                 raise ValueError("Button must be 'left' or 'right'")
-            
-            # Small delay for message processing
+
+            # Optional micro-adjustment after click to emulate natural cursor drift
+            if random.random() < 0.6:
+                drift_x = max(0, min(base_x + random.randint(-3, 3), client_width - 1))
+                drift_y = max(0, min(base_y + random.randint(-3, 3), client_height - 1))
+                win32gui.PostMessage(hwnd, win32con.WM_MOUSEMOVE, 0, win32api.MAKELONG(drift_x, drift_y))  # type: ignore
+                time.sleep(random.uniform(0.01, 0.03))
+
+            # Sporadically fall back to a tiny hardware tap to diversify signature
+            if random.random() < 0.15:
+                screen_pos = win32gui.ClientToScreen(hwnd, (base_x, base_y))  # type: ignore
+                self.user32.mouse_event(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK,
+                                        int((screen_pos[0] - self.virtual_left) * 65536 / self.virtual_width),
+                                        int((screen_pos[1] - self.virtual_top) * 65536 / self.virtual_height), 0, 0)
+                self.user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+                time.sleep(random.uniform(0.01, 0.025))
+                self.user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+                debug_log(LogCategory.MOUSE, "🛡️ [STEALTH-CLICK] Injected micro hardware tap for variability")
+
             time.sleep(random.uniform(0.02, 0.05))
             
             debug_log(LogCategory.MOUSE, f"✅ [STEALTH-CLICK] PostMessage click completed successfully")
