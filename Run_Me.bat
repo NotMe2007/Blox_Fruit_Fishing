@@ -316,16 +316,84 @@ if not exist "%UPDATES_DIR%" mkdir "%UPDATES_DIR%" >nul 2>&1
 
 set "UPDATE_ARCHIVE=%UPDATES_DIR%\%REPO_NAME%_%LATEST_VERSION%.zip"
 set "DOWNLOAD_URL=https://github.com/%REPO_OWNER%/%REPO_NAME%/archive/refs/tags/%LATEST_VERSION%.zip"
-
 if exist "%UPDATE_ARCHIVE%" del "%UPDATE_ARCHIVE%" >nul 2>&1
 
-powershell -NoProfile -Command "try { Invoke-WebRequest -UseBasicParsing -Headers @{ 'User-Agent' = 'BloxFruitUpdater' } -Uri '%DOWNLOAD_URL%' -OutFile '%UPDATE_ARCHIVE%' } catch { exit 1 }"
-if errorlevel 1 (
-    echo ❌ Failed to download the latest release. Continuing without updating.
+"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -Command "@'
+param(
+    [string]$Url,
+    [string]$Destination,
+    [string]$UserAgent = 'BloxFruitUpdater'
+)
+
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13
+$ErrorActionPreference = 'Stop'
+
+$destDir = [System.IO.Path]::GetDirectoryName($Destination)
+if (-not [string]::IsNullOrWhiteSpace($destDir) -and -not (Test-Path $destDir)) {
+    New-Item -ItemType Directory -Path $destDir | Out-Null
+}
+
+$script:completed = $false
+$script:errorMessage = $null
+$wc = New-Object System.Net.WebClient
+$wc.Headers['User-Agent'] = $UserAgent
+$start = Get-Date
+
+$wc.DownloadProgressChanged += {
+    param($sender, $args)
+    if ($args.TotalBytesToReceive -gt 0) {
+        $percent = [int]$args.ProgressPercentage
+        $receivedMB = $args.BytesReceived / 1MB
+        $totalMB = $args.TotalBytesToReceive / 1MB
+        $elapsed = (Get-Date) - $start
+        $speedMBps = if ($elapsed.TotalSeconds -gt 0) { $args.BytesReceived / 1MB / $elapsed.TotalSeconds } else { 0 }
+        $status = '{0}%% | {1:N1} MB / {2:N1} MB @ {3:N1} MB/s' -f $percent, $receivedMB, $totalMB, $speedMBps
+        Write-Progress -Activity 'Downloading update' -Status $status -PercentComplete $percent
+    } else {
+        $status = '{0:N1} MB downloaded' -f ($args.BytesReceived / 1MB)
+        Write-Progress -Activity 'Downloading update' -Status $status -PercentComplete 0
+    }
+}
+
+$wc.DownloadFileCompleted += {
+    param($sender, $args)
+    if ($args.Error) {
+        $script:errorMessage = $args.Error.Message
+    }
+    Write-Progress -Activity 'Downloading update' -Completed
+    $script:completed = $true
+}
+
+try {
+    $wc.DownloadFileAsync($Url, $Destination)
+    while (-not $script:completed) {
+        Start-Sleep -Milliseconds 200
+    }
+    if ($script:errorMessage) {
+        throw $script:errorMessage
+    }
+    if (-not (Test-Path $Destination)) {
+        throw 'Download failed - file not found.'
+    }
+    exit 0
+}
+catch {
+    Write-Error $_
+    exit 1
+}
+finally {
+    if ($wc) { $wc.Dispose() }
+}
+'@ | Set-Content -Encoding UTF8 -Path '%DOWNLOAD_SCRIPT%'"
+
+"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "%DOWNLOAD_SCRIPT%" -Url "%DOWNLOAD_URL%" -Destination "%UPDATE_ARCHIVE%" || (
+    if exist "%DOWNLOAD_SCRIPT%" del "%DOWNLOAD_SCRIPT%" >nul 2>&1
     if exist "%UPDATE_ARCHIVE%" del "%UPDATE_ARCHIVE%" >nul 2>&1
+    echo ❌ Failed to download the latest release. Continuing without updating.
     goto :EOF
 )
 
+if exist "%DOWNLOAD_SCRIPT%" del "%DOWNLOAD_SCRIPT%" >nul 2>&1
 echo ✅ Download complete. Extracting package...
 
 set "EXTRACTED_FOLDER=%UPDATES_DIR%\%REPO_NAME%-%LATEST_VERSION%"

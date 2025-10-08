@@ -7,6 +7,32 @@ import ctypes.wintypes
 import time
 from typing import Dict, Optional, Union
 
+# Debug Logger - Import with defensive fallback (mirrors Virtual_Mouse pattern)
+try:
+    from .Import_Utils import debug_log, LogCategory, DEBUG_LOGGER_AVAILABLE  # type: ignore
+except ImportError:
+    try:
+        from Import_Utils import debug_log, LogCategory, DEBUG_LOGGER_AVAILABLE  # type: ignore
+    except ImportError:
+        from enum import Enum
+        class LogCategory(Enum):  # type: ignore
+            KEYBOARD = "KEYBOARD"
+            SYSTEM = "SYSTEM"
+            ERROR = "ERROR"
+            DEBUG = "DEBUG"
+        def debug_log(category, message, show_time=False, show_category=True):  # type: ignore
+            print(f"[{category.value}] {message}")
+        DEBUG_LOGGER_AVAILABLE = False
+
+# Win32 API optional imports for PostMessage stealth typing
+try:
+    import win32api
+    import win32con
+    import win32gui
+    WIN32_AVAILABLE = True
+except ImportError:
+    WIN32_AVAILABLE = False
+
 
 # Windows API constants for keyboard
 KEYEVENTF_KEYDOWN = 0x0000
@@ -93,6 +119,9 @@ class VirtualKeyboard:
         """Initialize the virtual keyboard driver."""
         self.user32 = ctypes.windll.user32
         self.kernel32 = ctypes.windll.kernel32
+        self._window_manager_resolved = False
+        self._window_manager_warning_logged = False
+        self._get_hwnd_func = None
         
         # Verify API availability
         try:
@@ -102,9 +131,69 @@ class VirtualKeyboard:
                 ctypes.c_int
             ]
             self.user32.SendInput.restype = ctypes.wintypes.UINT
-            print("Virtual keyboard initialized successfully")
+            debug_log(LogCategory.SYSTEM, "Virtual keyboard initialized successfully")
         except Exception as e:
-            print(f"Warning: Virtual keyboard initialization failed: {e}")
+            debug_log(LogCategory.ERROR, f"Warning: Virtual keyboard initialization failed: {e}")
+
+    def _resolve_window_manager(self) -> bool:
+        """Resolve Roblox window helpers lazily to avoid circular imports."""
+        if self._window_manager_resolved and self._get_hwnd_func:
+            return True
+        try:
+            from .Window_Manager import get_roblox_hwnd  # type: ignore
+        except ImportError:
+            try:
+                from Window_Manager import get_roblox_hwnd  # type: ignore
+            except ImportError:
+                if not self._window_manager_warning_logged:
+                    debug_log(LogCategory.SYSTEM, "⚠️ Window Manager not available for stealth keyboard input")
+                    self._window_manager_warning_logged = True
+                return False
+        self._get_hwnd_func = get_roblox_hwnd  # type: ignore
+        self._window_manager_resolved = True
+        debug_log(LogCategory.SYSTEM, "🔗 Window Manager linked for stealth keyboard input")
+        return True
+
+    def _postmessage_key_event(self, vk_code: int, is_down: bool, key: Optional[Union[str, int]] = None) -> bool:
+        """Attempt to send Roblox key events via PostMessage for stealth typing."""
+        if not WIN32_AVAILABLE:
+            return False
+        if not self._resolve_window_manager() or self._get_hwnd_func is None:
+            return False
+        hwnd = self._get_hwnd_func()
+        if not hwnd:
+            return False
+        try:
+            scan_code = win32api.MapVirtualKey(vk_code, 0)  # type: ignore
+        except Exception as e:
+            debug_log(LogCategory.ERROR, f"❌ MapVirtualKey failed: {e}")
+            return False
+        repeat_count = 1
+        lparam = repeat_count | (scan_code << 16)
+        if not is_down:
+            lparam |= 0xC0000000  # Release + previous state
+        message = win32con.WM_KEYDOWN if is_down else win32con.WM_KEYUP  # type: ignore
+        try:
+            win32gui.PostMessage(hwnd, message, vk_code, lparam)  # type: ignore
+            phase = "DOWN" if is_down else "UP"
+            debug_log(LogCategory.SYSTEM, f"🎹 [STEALTH-POSTMSG] VK {vk_code} {phase} via PostMessage")
+            # Send WM_CHAR for printable characters on key down to mimic natural input
+            if is_down and isinstance(key, str):
+                char = None
+                if len(key) == 1:
+                    char = key
+                elif key == 'space':
+                    char = ' '
+                if char:
+                    try:
+                        win32gui.PostMessage(hwnd, win32con.WM_CHAR, ord(char), lparam)  # type: ignore
+                        debug_log(LogCategory.SYSTEM, f"🎹 [STEALTH-POSTMSG] WM_CHAR '{char}' dispatched")
+                    except Exception as char_err:
+                        debug_log(LogCategory.DEBUG, f"WM_CHAR dispatch failed: {char_err}")
+            return True
+        except Exception as e:
+            debug_log(LogCategory.ERROR, f"❌ PostMessage key event failed: {e}")
+            return False
     
     def _create_keyboard_input(self, vk_code: int, flags: int) -> INPUT:
         """Create a keyboard input structure."""
@@ -123,7 +212,7 @@ class VirtualKeyboard:
             result = self.user32.SendInput(1, ctypes.byref(input_struct), ctypes.sizeof(INPUT))
             return result == 1
         except Exception as e:
-            print(f"Error sending keyboard input: {e}")
+            debug_log(LogCategory.ERROR, f"Error sending keyboard input: {e}")
             return False
     
     def _get_vk_code(self, key: Union[str, int]) -> Optional[int]:
@@ -138,9 +227,11 @@ class VirtualKeyboard:
         """Press a key down (without releasing)."""
         vk_code = self._get_vk_code(key)
         if vk_code is None:
-            print(f"Unknown key: {key}")
+            debug_log(LogCategory.ERROR, f"Unknown key: {key}")
             return False
-        
+        if self._postmessage_key_event(vk_code, True, key):
+            return True
+        debug_log(LogCategory.DEBUG, f"⚙️ Falling back to SendInput key down for VK {vk_code}")
         key_input = self._create_keyboard_input(vk_code, KEYEVENTF_KEYDOWN)
         return self._send_input(key_input)
     
@@ -148,9 +239,11 @@ class VirtualKeyboard:
         """Release a key."""
         vk_code = self._get_vk_code(key)
         if vk_code is None:
-            print(f"Unknown key: {key}")
+            debug_log(LogCategory.ERROR, f"Unknown key: {key}")
             return False
-        
+        if self._postmessage_key_event(vk_code, False, key):
+            return True
+        debug_log(LogCategory.DEBUG, f"⚙️ Falling back to SendInput key up for VK {vk_code}")
         key_input = self._create_keyboard_input(vk_code, KEYEVENTF_KEYUP)
         return self._send_input(key_input)
     
@@ -198,7 +291,7 @@ class VirtualKeyboard:
                 if not self.key_press(char, delay):
                     success = False
             else:
-                print(f"Warning: Cannot type character '{char}'")
+                debug_log(LogCategory.ERROR, f"Warning: Cannot type character '{char}'")
                 success = False
             
             # Small delay between characters for more natural typing

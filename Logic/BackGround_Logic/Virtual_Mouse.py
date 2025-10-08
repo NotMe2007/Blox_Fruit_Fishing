@@ -116,6 +116,87 @@ class VirtualMouse:
         # Also get primary screen dimensions for fallback
         self.primary_width = self.user32.GetSystemMetrics(0)
         self.primary_height = self.user32.GetSystemMetrics(1)
+
+        # Lazy-loaded window manager helpers (avoid circular import during startup)
+        self._window_manager_resolved = False
+        self._window_manager_warning_logged = False
+        self._get_hwnd_func = None
+        self._ensure_focus_func = None
+
+    def _resolve_window_manager(self) -> bool:
+        """Resolve Roblox window helpers lazily to avoid circular imports."""
+        if self._window_manager_resolved and self._get_hwnd_func:
+            return True
+        try:
+            from .Window_Manager import get_roblox_hwnd, ensure_roblox_focused  # type: ignore
+        except ImportError:
+            try:
+                from Window_Manager import get_roblox_hwnd, ensure_roblox_focused  # type: ignore
+            except ImportError:
+                if not self._window_manager_warning_logged:
+                    debug_log(LogCategory.MOUSE, "⚠️ Window Manager not available for stealth input routing")
+                    self._window_manager_warning_logged = True
+                return False
+        self._get_hwnd_func = get_roblox_hwnd  # type: ignore
+        self._ensure_focus_func = ensure_roblox_focused  # type: ignore
+        self._window_manager_resolved = True
+        debug_log(LogCategory.MOUSE, "🔗 Window Manager linked for stealth mouse input")
+        return True
+
+    def _screen_to_client(self, hwnd, x: int, y: int) -> Optional[Tuple[int, int]]:
+        """Convert screen coordinates to Roblox client-area coordinates."""
+        try:
+            window_rect = win32gui.GetWindowRect(hwnd)  # type: ignore
+            client_rect = win32gui.GetClientRect(hwnd)  # type: ignore
+        except Exception as e:
+            debug_log(LogCategory.ERROR, f"❌ Failed to query Roblox window metrics: {e}")
+            return None
+        border_x = (window_rect[2] - window_rect[0] - client_rect[2]) // 2
+        title_height = window_rect[3] - window_rect[1] - client_rect[3] - border_x
+        window_x = x - window_rect[0] - border_x
+        window_y = y - window_rect[1] - title_height
+        window_x = max(0, min(window_x, client_rect[2] - 1))
+        window_y = max(0, min(window_y, client_rect[3] - 1))
+        return window_x, window_y
+
+    def _postmessage_mouse_event(self, x: int, y: int, button: str, is_down: bool) -> bool:
+        """Attempt stealth mouse button event via PostMessage."""
+        if not WIN32_AVAILABLE:
+            return False
+        if not self._resolve_window_manager() or self._get_hwnd_func is None:
+            return False
+        hwnd = self._get_hwnd_func()
+        if not hwnd:
+            return False
+        client_coords = self._screen_to_client(hwnd, x, y)
+        if client_coords is None:
+            return False
+        client_x, client_y = client_coords
+        jitter_x = random.randint(-1, 1)
+        jitter_y = random.randint(-1, 1)
+        final_x = max(0, client_x + jitter_x)
+        final_y = max(0, client_y + jitter_y)
+        message = None
+        wparam = 0
+        if button == 'left':
+            message = win32con.WM_LBUTTONDOWN if is_down else win32con.WM_LBUTTONUP  # type: ignore
+            wparam = win32con.MK_LBUTTON if is_down else 0  # type: ignore
+        elif button == 'right':
+            message = win32con.WM_RBUTTONDOWN if is_down else win32con.WM_RBUTTONUP  # type: ignore
+            wparam = win32con.MK_RBUTTON if is_down else 0  # type: ignore
+        else:
+            raise ValueError("Button must be 'left' or 'right'")
+        lparam = win32api.MAKELONG(final_x, final_y)  # type: ignore
+        try:
+            win32gui.PostMessage(hwnd, message, wparam, lparam)  # type: ignore
+            phase = "DOWN" if is_down else "UP"
+            debug_log(LogCategory.MOUSE, f"🕵️ [STEALTH-POSTMSG] {button.title()} {phase} via PostMessage at ({final_x}, {final_y})")
+            if is_down:
+                time.sleep(random.uniform(0.01, 0.03))
+            return True
+        except Exception as e:
+            debug_log(LogCategory.ERROR, f"❌ PostMessage mouse event failed: {e}")
+            return False
     
     def get_cursor_pos(self) -> Tuple[int, int]:
         """Get current cursor position using Windows API."""
@@ -534,43 +615,41 @@ class VirtualMouse:
     
     def mouse_down(self, x: int, y: int, button: str = 'left'):
         """Press mouse button down at specified coordinates."""
+        if self._postmessage_mouse_event(x, y, button, True):
+            return True
         if button == 'left':
             flag = MOUSEEVENTF_LEFTDOWN
         elif button == 'right':
             flag = MOUSEEVENTF_RIGHTDOWN
         else:
             raise ValueError("Button must be 'left' or 'right'")
-        
-        # Convert screen coordinates to virtual desktop coordinates
         virtual_x = x - self.virtual_left
         virtual_y = y - self.virtual_top
-        
-        # Convert to absolute coordinates (0-65535 range) within virtual desktop
         abs_x = int((virtual_x * 65535) / self.virtual_width)
         abs_y = int((virtual_y * 65535) / self.virtual_height)
-        
+        debug_log(LogCategory.MOUSE, "⚙️ Falling back to hardware mouse down event")
         down_input = self._create_mouse_input(abs_x, abs_y, flag | MOUSEEVENTF_ABSOLUTE)
         self._send_input(down_input)
+        return True
     
     def mouse_up(self, x: int, y: int, button: str = 'left'):
         """Release mouse button at specified coordinates."""
+        if self._postmessage_mouse_event(x, y, button, False):
+            return True
         if button == 'left':
             flag = MOUSEEVENTF_LEFTUP
         elif button == 'right':
             flag = MOUSEEVENTF_RIGHTUP
         else:
             raise ValueError("Button must be 'left' or 'right'")
-        
-        # Convert screen coordinates to virtual desktop coordinates
         virtual_x = x - self.virtual_left
         virtual_y = y - self.virtual_top
-        
-        # Convert to absolute coordinates (0-65535 range) within virtual desktop
         abs_x = int((virtual_x * 65535) / self.virtual_width)
         abs_y = int((virtual_y * 65535) / self.virtual_height)
-        
+        debug_log(LogCategory.MOUSE, "⚙️ Falling back to hardware mouse up event")
         up_input = self._create_mouse_input(abs_x, abs_y, flag | MOUSEEVENTF_ABSOLUTE)
         self._send_input(up_input)
+        return True
 
     def _ensure_window_focus_before_click(self):
         """
@@ -580,18 +659,10 @@ class VirtualMouse:
         Without proper focus, clicks are detected/blocked by Roblox anti-automation.
         """
         try:
-            # Import Window Manager for focus functionality
-            try:
-                from .Window_Manager import ensure_roblox_focused
-            except ImportError:
-                try:
-                    from Window_Manager import ensure_roblox_focused
-                except ImportError:
-                    debug_log(LogCategory.MOUSE, "⚠️ Window Manager not available - skipping focus")
-                    return
-            
-            # Critical: Ensure Roblox is focused before every click
-            focus_success = ensure_roblox_focused()
+            if not self._resolve_window_manager() or self._ensure_focus_func is None:
+                debug_log(LogCategory.MOUSE, "⚠️ Window Manager not available - skipping focus")
+                return
+            focus_success = self._ensure_focus_func()
             
             if focus_success:
                 debug_log(LogCategory.MOUSE, "✅ [AHK-STYLE] Window focus confirmed before click")

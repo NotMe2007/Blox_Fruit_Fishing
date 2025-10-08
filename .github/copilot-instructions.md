@@ -3,6 +3,7 @@
 ## Architecture Overview
 
 This is a Roblox game automation tool with a **launcher-script separation pattern**:
+- `Launcher.py`: CLI/console entrypoint that handles updates, dependency checks, and spawns the GUI
 - `Main.py`: GUI launcher with hotkey management and Roblox validation  
 - `Logic/fishing_Script.py`: Core automation engine with template matching
 - `Logic/BackGround_Logic/`: Specialized detection and control modules
@@ -52,13 +53,15 @@ debug_log(LogCategory.FISH_DETECTION, "Template match score: 0.85")
 - Emoji indicators for visual category recognition
 
 ### Anti-Detection Input Simulation
-- **Virtual Mouse**: `Virtual_Mouse.py` uses Windows API calls, not PyAutoGUI
+- **PostMessage-first pipeline**: Both `Virtual_Mouse` and `Virtual_Keyboard` now prioritize background `PostMessage` events (with window-relative coordinate conversion) before falling back to hardware `SendInput` calls, and they emit debug traces when a fallback happens.
+- **Virtual Mouse**: `Virtual_Mouse.py` still randomizes approach curves and hold timing while preferring stealth PostMessage clicks for both tap and hold phases.
+- **Virtual Keyboard**: `Virtual_Keyboard.py` maps virtual-key codes to Roblox client messages and mirrors human typing by dispatching `WM_CHAR` events when appropriate.
 - **Randomization**: `offset_x = random.randint(-2, 2)` for click positions
 - **Human Timing**: `time.sleep(random.uniform(0.05, 0.15))` between actions
-- **Hardware-Level**: Virtual mouse driver bypasses userland detection
+- **Hardware-Level Fallback**: When PostMessage isn't available, the driver logs the downgrade and reuses the existing hardware-level simulation to stay functional.
 
 ### Configuration Management
-- **JSON Settings**: Hotkeys in `Logic/BackGround_Logic/hotkey_settings.json`; all configs stay human-readable, JSON-based, and are expected to be edited at runtime before being persisted back to disk
+- **JSON Settings**: Hotkeys in `Logic/BackGround_Logic/hotkey_settings.json`
 - **Numpad Restriction**: `VALID_NUMPAD_KEYS = ['num 0', 'num 1', ...]` (avoids game conflicts)
 - **Dataclass Configs**: `MinigameConfig` uses `@dataclass` for structured parameters
 - **Runtime Settings**: Settings loaded/saved dynamically during execution
@@ -72,10 +75,12 @@ debug_log(LogCategory.FISH_DETECTION, "Template match score: 0.85")
 ## Development Workflows
 
 ### Running/Testing
-1. **Quick Setup**: `Run_Me.bat` handles Python install, deps, and launch
-2. **Manual Launch**: `python Main.py` (validates Roblox state first)
+1. **Primary launch**: `python Launcher.py` (performs env checks, fetches updates, then opens the GUI)
+2. **Direct GUI launch**: `python Main.py` (skips launcher safeguards—use for targeted UI debugging only)
 3. **Quick Testing**: `python tests/quick_test.py` for essential functionality
 4. **Full Testing**: `python tests/run_all_tests.py` for comprehensive validation
+
+`Run_Me.bat` is legacy and no longer maintained—do not edit or rely on it when adding features.
 
 ### Adding New Detection Features
 1. Add template images to `Images/` directory
