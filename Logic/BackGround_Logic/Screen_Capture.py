@@ -137,9 +137,6 @@ class ScreenCapture:
                         # Convert BGRA to RGB (Windows bitmap format is BGRA)
                         image_array = image_array[:, :, [2, 1, 0]]  # BGR to RGB
                         
-                        # Flip vertically (Windows bitmaps are bottom-up)
-                        image_array = np.flipud(image_array)
-                        
                         # Create PIL Image
                         pil_image = Image.fromarray(image_array, 'RGB')
                         

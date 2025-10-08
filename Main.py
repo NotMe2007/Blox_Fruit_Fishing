@@ -295,6 +295,7 @@ class LauncherApp(_BaseLauncher):
         self.focus_force()  # Force focus to the window
 
         self.process = None
+        self.launching_script = False
         
         # Track if user is typing (to disable hotkeys)
         self.typing_in_field = False
@@ -371,6 +372,8 @@ class LauncherApp(_BaseLauncher):
             command=self.toggle_topmost,
         )
         self.topmost_btn.pack(pady=(0, 10))
+        self._update_topmost_button()
+        self._set_start_button_mode("idle")
 
         # Settings management buttons
         settings_frame = ctk.CTkFrame(tab_frame, fg_color="transparent")
@@ -602,6 +605,8 @@ class LauncherApp(_BaseLauncher):
         # Topmost toggle button
         self.topmost_btn = tk.Button(tab_frame, text="📌 Always on Top: ON", width=25, height=1, command=self.toggle_topmost)
         self.topmost_btn.pack(pady=(5, 10))
+        self._update_topmost_button()
+        self._set_start_button_mode("idle")
 
         # Settings management buttons
         settings_frame = tk.Frame(tab_frame)
@@ -1062,6 +1067,51 @@ class LauncherApp(_BaseLauncher):
         elif hasattr(self.topmost_btn, 'config'):
             self.topmost_btn.config(text=button_text)
 
+    def _set_start_button_mode(self, mode: str, *, disable: bool = False) -> None:
+        """Apply consistent styling and behavior for the start/stop button."""
+        if mode not in {"idle", "running"}:
+            raise ValueError(f"Unsupported button mode: {mode}")
+
+        is_idle = mode == "idle"
+        if ctk:
+            if is_idle:
+                self.btn.configure(
+                    text="Auto Fishing",
+                    fg_color="#1fb57a",
+                    hover_color="#199a63",
+                    command=self.on_start,
+                    state="disabled" if disable else "normal",
+                )
+            else:
+                self.btn.configure(
+                    text="Stop Auto Fishing",
+                    fg_color="#c82333",
+                    hover_color="#a71d2a",
+                    command=self.on_start,
+                    state="disabled" if disable else "normal",
+                )
+        else:
+            if is_idle:
+                self.btn.config(
+                    text="Auto Fishing",
+                    bg="#1fb57a",
+                    activebackground="#199a63",
+                    fg="white",
+                    activeforeground="white",
+                    command=self.on_start,
+                    state="disabled" if disable else "normal",
+                )
+            else:
+                self.btn.config(
+                    text="Stop Auto Fishing",
+                    bg="#c82333",
+                    activebackground="#a71d2a",
+                    fg="white",
+                    activeforeground="white",
+                    command=self.on_start,
+                    state="disabled" if disable else "normal",
+                )
+
     def _on_entry_focus_in(self, event):
         """Called when user starts typing in an entry field."""
         self.typing_in_field = True
@@ -1220,80 +1270,93 @@ class LauncherApp(_BaseLauncher):
             messagebox.showerror("Script not found", f"Could not find:\n{SCRIPT_PATH}")
             return
 
+        if self.launching_script:
+            debug_log(LogCategory.UI, "Launch request ignored: script already starting.")
+            return
+
         if self.process and self.process.poll() is None:
             # process is running -> stop it
             self._stop_process()
             return
+
+        self.launching_script = True
+        self._set_start_button_mode("running", disable=True)
 
         # Check Roblox status before starting
         try:
             roblox_status = check_roblox_and_game()
             
             if not roblox_status['can_proceed']:
+                self.launching_script = False
+                self._set_start_button_mode("idle")
                 # Ask user if they want to wait for Roblox/Blox Fruits
                 retry_msg = f"{roblox_status['message']}\n\nWould you like to wait and retry automatically?"
                 retry = messagebox.askyesno("Roblox Check Failed", retry_msg)
                 
                 if retry:
+                    self.launching_script = True
                     # Disable button and wait for Roblox/Blox Fruits
                     if ctk:
-                        self.btn.configure(state="disabled", text="Waiting for Blox Fruits...")
+                        self.btn.configure(
+                            state="disabled",
+                            text="Waiting for Blox Fruits...",
+                            fg_color="#6c757d",
+                            hover_color="#6c757d",
+                        )
                     else:
-                        self.btn.configure(state="disabled", text="Waiting for Blox Fruits...")
+                        self.btn.config(
+                            state="disabled",
+                            text="Waiting for Blox Fruits...",
+                            bg="#6c757d",
+                            activebackground="#6c757d",
+                            fg="white",
+                            activeforeground="white",
+                        )
                     
                     threading.Thread(target=self._wait_for_blox_fruits, daemon=True).start()
                 return
             # If can_proceed is True, just continue to start the script automatically
             # No success message needed - just start the fishing
         except Exception as e:
+            self.launching_script = False
+            self._set_start_button_mode("idle")
             messagebox.showerror("Roblox Check Error", f"Failed to check Roblox status: {str(e)}")
             return
 
         # disable button and start
         try:
-            if ctk:
-                self.btn.configure(state="disabled", text="Starting...")
-            else:
-                self.btn.configure(state="disabled", text="Starting...")
-
             threading.Thread(target=self._launch_script, daemon=True).start()
         except Exception as e:
+            self.launching_script = False
+            self._set_start_button_mode("idle")
             messagebox.showerror("Error", str(e))
-            if ctk:
-                self.btn.configure(state="normal", text="Auto Fishing")
-            else:
-                self.btn.configure(state="normal", text="Auto Fishing")
+            
 
     def _launch_script(self):
+        process = None
         try:
             # Note: Window focusing is now handled by the fishing script itself
             debug_log(LogCategory.UI, "Starting fishing script...")
             
             # launching - status updates removed
             # spawn the script in a separate process so GUI stays responsive
-            self.process = subprocess.Popen([sys.executable, SCRIPT_PATH], cwd=os.path.dirname(SCRIPT_PATH))
-            # process started
-            # re-enable button to allow stopping
-            if ctk:
-                self.btn.configure(state="normal", text="Stop Auto Fishing", command=self.on_start)
-            else:
-                self.btn.configure(state="normal", text="Stop Auto Fishing", command=self.on_start)
+            process = subprocess.Popen([sys.executable, SCRIPT_PATH], cwd=os.path.dirname(SCRIPT_PATH))
+            self.process = process
+            self.launching_script = False
+            self._set_start_button_mode("running")
 
             # wait for process to exit
-            self.process.wait()
-            # process stopped
-            if ctk:
-                self.btn.configure(text="Auto Fishing", command=self.on_start)
-            else:
-                self.btn.configure(text="Auto Fishing", command=self.on_start)
-
+            process.wait()
         except Exception as e:
+            self.launching_script = False
+            self.process = None
+            self._set_start_button_mode("idle")
             messagebox.showerror("Launch failed", str(e))
-            # error occurred (no status widget)
-            if ctk:
-                self.btn.configure(state="normal", text="Auto Fishing")
-            else:
-                self.btn.configure(state="normal", text="Auto Fishing")
+            return
+        finally:
+            if process is not None and process.poll() is not None:
+                self.process = None
+                self._set_start_button_mode("idle")
 
     def _wait_for_blox_fruits(self):
         """Wait for user to open Blox Fruits, then automatically start the script."""
@@ -1310,35 +1373,33 @@ class LauncherApp(_BaseLauncher):
                 # Timeout reached
                 messagebox.showwarning("Timeout", "Timeout reached. Please open Blox Fruits and try again.")
                 # Re-enable button
-                if ctk:
-                    self.btn.configure(state="normal", text="Auto Fishing")
-                else:
-                    self.btn.configure(state="normal", text="Auto Fishing")
+                self.launching_script = False
+                self._set_start_button_mode("idle")
         except Exception as e:
             messagebox.showerror("Error", f"Error while waiting for Blox Fruits: {str(e)}")
             # Re-enable button
-            if ctk:
-                self.btn.configure(state="normal", text="Auto Fishing")
-            else:
-                self.btn.configure(state="normal", text="Auto Fishing")
+            self.launching_script = False
+            self._set_start_button_mode("idle")
 
     def _stop_process(self):
-        if not self.process:
+        process = self.process
+        if not process:
+            self.launching_script = False
+            self._set_start_button_mode("idle")
             return
-        if self.process.poll() is None:
+        if process.poll() is None:
             try:
-                self.process.terminate()
-                self.process.wait(timeout=5)
+                process.terminate()
+                process.wait(timeout=5)
             except Exception:
                 try:
-                    self.process.kill()
+                    process.kill()
                 except Exception:
                     pass
 
-        if ctk:
-            self.btn.configure(text="Auto Fishing", command=self.on_start)
-        else:
-            self.btn.configure(text="Auto Fishing", command=self.on_start)
+        self.process = None
+        self.launching_script = False
+        self._set_start_button_mode("idle")
 
     def _add_hotkey_section(self, container):
         """Add hotkey configuration section to modern UI."""

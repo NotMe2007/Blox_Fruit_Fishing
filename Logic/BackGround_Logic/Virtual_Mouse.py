@@ -144,20 +144,18 @@ class VirtualMouse:
         return True
 
     def _screen_to_client(self, hwnd, x: int, y: int) -> Optional[Tuple[int, int]]:
-        """Convert screen coordinates to Roblox client-area coordinates."""
-        try:
-            window_rect = win32gui.GetWindowRect(hwnd)  # type: ignore
-            client_rect = win32gui.GetClientRect(hwnd)  # type: ignore
-        except Exception as e:
-            debug_log(LogCategory.ERROR, f"❌ Failed to query Roblox window metrics: {e}")
+        """Convert screen coordinates to Roblox client-area coordinates using Win32 helper."""
+        if not WIN32_AVAILABLE:
             return None
-        border_x = (window_rect[2] - window_rect[0] - client_rect[2]) // 2
-        title_height = window_rect[3] - window_rect[1] - client_rect[3] - border_x
-        window_x = x - window_rect[0] - border_x
-        window_y = y - window_rect[1] - title_height
-        window_x = max(0, min(window_x, client_rect[2] - 1))
-        window_y = max(0, min(window_y, client_rect[3] - 1))
-        return window_x, window_y
+        try:
+            client_x, client_y = win32gui.ScreenToClient(hwnd, (x, y))  # type: ignore
+            left, top, right, bottom = win32gui.GetClientRect(hwnd)  # type: ignore
+            client_x = max(left, min(client_x, right - 1))
+            client_y = max(top, min(client_y, bottom - 1))
+            return client_x, client_y
+        except Exception as e:
+            debug_log(LogCategory.ERROR, f"❌ ScreenToClient conversion failed: {e}")
+            return None
 
     def _postmessage_mouse_event(self, x: int, y: int, button: str, is_down: bool) -> bool:
         """Attempt stealth mouse button event via PostMessage."""

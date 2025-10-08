@@ -166,15 +166,17 @@ UN_PATH = IMAGES_DIR / 'Basic_Fishing_UN.png'
 EQ_PATH = IMAGES_DIR / 'Basic_Fishing_EQ.png'
 # Region to check within the Roblox window: top-left and bottom-right offsets (inclusive)
 TOP_LEFT = (725, 1004)
-BOTTOM_RIGHT = (1189, 1072)
-threshold = 0.50   # matching threshold (0-1). Increased from 35% to 50% for better accuracy
+BOTTOM_RIGHT = (1224, 1079)
+BOTTOM_RIGHT = (1224, 1079)
+threshold = 0.58   # matching threshold (0-1). Tuned to reduce lighting false positives
 debug = True       # set True to print info and save debug image
 
 # Confidence tuning
 EQ_PRIORITY_MARGIN = 0.04   # Minimum EQ score advantage over UN to trust EQ when both exceed threshold
 UN_PRIORITY_MARGIN = 0.025  # Minimum UN score advantage over EQ when both exceed threshold
-LETTER_SCORE_THRESHOLD = 0.55
+LETTER_SCORE_THRESHOLD = 0.62
 LETTER_DIFF_MARGIN = 0.05
+LETTER_RELAX_MARGIN = 0.05  # Allow lower template score when letter match is confident
 
 
 def load_templates():
@@ -458,14 +460,28 @@ def check_region_and_act():
     eq_super_confident = best_eq_val_scalar >= threshold + 0.1
     un_super_confident = best_un_val_scalar >= threshold + 0.1
 
-    if eq_candidate and (not un_candidate or eq_stronger or eq_super_confident or eq_letter_confident):
+    eq_template_ok = best_eq_val_scalar >= threshold
+    un_template_ok = best_un_val_scalar >= threshold
+
+    if not eq_template_ok and eq_letter_confident and best_eq_val_scalar >= threshold - LETTER_RELAX_MARGIN:
+        print(f'🅴 Relaxed EQ acceptance: score {best_eq_val_scalar:.3f} with strong letter match {eq_letter_score:.3f}')
+        eq_template_ok = True
+
+    if not un_template_ok and un_letter_confident and best_un_val_scalar >= threshold - LETTER_RELAX_MARGIN:
+        print(f'🎣 Relaxed UN acceptance: score {best_un_val_scalar:.3f} with strong letter match {un_letter_score:.3f}')
+        un_template_ok = True
+
+    eq_confident = (eq_template_ok and (eq_letter_confident or eq_super_confident or (not un_candidate or eq_stronger)))
+    un_confident = (un_template_ok and (un_letter_confident or un_super_confident or (not eq_candidate or un_stronger)))
+
+    if eq_candidate and eq_confident:
         print(f'EQ detected in region - rod is equipped (score={best_eq_val_scalar:.3f}, UN={best_un_val_scalar:.3f})')
         if eq_letter_score is not None:
             print(f'🅴 Letter confidence: EQ={eq_letter_score:.3f} vs UN={eq_letter_un_score if eq_letter_un_score is not None else "n/a"}')
         return False
 
-    if (best_un_loc is not None and best_un_size is not None and best_un_val_scalar >= threshold and
-        (not eq_candidate or un_stronger or un_super_confident or un_letter_confident)):
+    if (best_un_loc is not None and best_un_size is not None and un_template_ok and
+        un_confident):
         tw, th = best_un_size
         click_x = left + int(best_un_loc[0]) + tw // 2
         click_y = top + int(best_un_loc[1]) + th // 2
@@ -562,10 +578,14 @@ def check_region_and_act():
         print(f'ℹ️ EQ candidate score={best_eq_val_scalar:.3f}, UN score={best_un_val_scalar:.3f} – awaiting stronger evidence')
         if eq_letter_score is not None:
             print(f'   Letter match EQ={eq_letter_score:.3f} vs UN={eq_letter_un_score if eq_letter_un_score is not None else "n/a"}')
+        if not eq_confident:
+            print('   ⚠️ EQ letter check or confidence insufficient – no state change')
     if un_candidate:
         print(f'ℹ️ UN candidate score={best_un_val_scalar:.3f}, EQ score={best_eq_val_scalar:.3f} – awaiting stronger evidence')
         if un_letter_score is not None:
             print(f'   Letter match UN={un_letter_score:.3f} vs EQ={un_letter_eq_score if un_letter_eq_score is not None else "n/a"}')
+        if not un_confident:
+            print('   ⚠️ UN letter check or confidence insufficient – skipping equip click')
 
     # Enhanced debug information for failed detections
     print(f'No UN or EQ detected in the region')
