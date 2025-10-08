@@ -58,7 +58,7 @@ debug_log(LogCategory.FISH_DETECTION, "Template match score: 0.85")
 - **Hardware-Level**: Virtual mouse driver bypasses userland detection
 
 ### Configuration Management
-- **JSON Settings**: Hotkeys in `Logic/BackGround_Logic/hotkey_settings.json`
+- **JSON Settings**: Hotkeys in `Logic/BackGround_Logic/hotkey_settings.json`; all configs stay human-readable, JSON-based, and are expected to be edited at runtime before being persisted back to disk
 - **Numpad Restriction**: `VALID_NUMPAD_KEYS = ['num 0', 'num 1', ...]` (avoids game conflicts)
 - **Dataclass Configs**: `MinigameConfig` uses `@dataclass` for structured parameters
 - **Runtime Settings**: Settings loaded/saved dynamically during execution
