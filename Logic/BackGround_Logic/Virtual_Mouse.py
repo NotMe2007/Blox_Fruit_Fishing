@@ -1,6 +1,6 @@
 """
-Virtual Mouse Driver using Windows API for undetectable mouse input.
-Uses low-level Windows API calls to simulate hardware mouse input.
+Mouse input through the documented Windows SendInput API.
+Success means Windows accepted an event, not that the game acted on it.
 """
 import ctypes
 import ctypes.wintypes
@@ -9,7 +9,7 @@ import math
 import random
 from typing import Tuple, Optional
 
-# Win32 API for PostMessage stealth clicking (bypasses anti-cheat)
+# Win32 helpers for checking the target window
 try:
     import win32api
     import win32con
@@ -52,56 +52,23 @@ HC_ACTION = 0
 class POINT(ctypes.Structure):
     _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
 
-class MOUSEINPUT(ctypes.Structure):
-    _fields_ = [
-        ("dx", ctypes.wintypes.LONG),
-        ("dy", ctypes.wintypes.LONG),
-        ("mouseData", ctypes.wintypes.DWORD),
-        ("dwFlags", ctypes.wintypes.DWORD),
-        ("time", ctypes.wintypes.DWORD),
-        ("dwExtraInfo", ctypes.POINTER(ctypes.wintypes.ULONG))
-    ]
-
-class KEYBDINPUT(ctypes.Structure):
-    _fields_ = [
-        ("wVk", ctypes.wintypes.WORD),
-        ("wScan", ctypes.wintypes.WORD),
-        ("dwFlags", ctypes.wintypes.DWORD),
-        ("time", ctypes.wintypes.DWORD),
-        ("dwExtraInfo", ctypes.POINTER(ctypes.wintypes.ULONG))
-    ]
-
-class HARDWAREINPUT(ctypes.Structure):
-    _fields_ = [
-        ("uMsg", ctypes.wintypes.DWORD),
-        ("wParamL", ctypes.wintypes.WORD),
-        ("wParamH", ctypes.wintypes.WORD)
-    ]
-
-class INPUT(ctypes.Structure):
-    class _INPUT(ctypes.Union):
-        _fields_ = [
-            ("mi", MOUSEINPUT),
-            ("ki", KEYBDINPUT),
-            ("hi", HARDWAREINPUT)
-        ]
-    
-    _anonymous_ = ("_input",)
-    _fields_ = [
-        ("type", ctypes.wintypes.DWORD),
-        ("_input", _INPUT)
-    ]
+try:
+    from .Windows_Input import INPUT, MOUSEINPUT, KEYBDINPUT, HARDWAREINPUT
+except ImportError:
+    from Windows_Input import INPUT, MOUSEINPUT, KEYBDINPUT, HARDWAREINPUT
 
 
 class VirtualMouse:
     """
-    Virtual mouse driver that uses Windows API to create hardware-level mouse input.
-    This bypasses most anti-cheat detection because it appears as real hardware input.
+    Foreground mouse input with checked SendInput results.
     """
     
     def __init__(self):
-        self.user32 = ctypes.windll.user32
+        self.user32 = ctypes.WinDLL("user32", use_last_error=True)
+        self.user32.SendInput.argtypes = [ctypes.wintypes.UINT, ctypes.POINTER(INPUT), ctypes.c_int]
+        self.user32.SendInput.restype = ctypes.wintypes.UINT
         self.kernel32 = ctypes.windll.kernel32
+        debug_log(LogCategory.SYSTEM, "Mouse backend: Windows SendInput (foreground input)")
         
         # Get virtual desktop dimensions (all monitors combined)
         # SM_XVIRTUALSCREEN = 76, SM_YVIRTUALSCREEN = 77
@@ -157,45 +124,6 @@ class VirtualMouse:
             debug_log(LogCategory.ERROR, f"❌ ScreenToClient conversion failed: {e}")
             return None
 
-    def _postmessage_mouse_event(self, x: int, y: int, button: str, is_down: bool) -> bool:
-        """Attempt stealth mouse button event via PostMessage."""
-        if not WIN32_AVAILABLE:
-            return False
-        if not self._resolve_window_manager() or self._get_hwnd_func is None:
-            return False
-        hwnd = self._get_hwnd_func()
-        if not hwnd:
-            return False
-        client_coords = self._screen_to_client(hwnd, x, y)
-        if client_coords is None:
-            return False
-        client_x, client_y = client_coords
-        jitter_x = random.randint(-1, 1)
-        jitter_y = random.randint(-1, 1)
-        final_x = max(0, client_x + jitter_x)
-        final_y = max(0, client_y + jitter_y)
-        message = None
-        wparam = 0
-        if button == 'left':
-            message = win32con.WM_LBUTTONDOWN if is_down else win32con.WM_LBUTTONUP  # type: ignore
-            wparam = win32con.MK_LBUTTON if is_down else 0  # type: ignore
-        elif button == 'right':
-            message = win32con.WM_RBUTTONDOWN if is_down else win32con.WM_RBUTTONUP  # type: ignore
-            wparam = win32con.MK_RBUTTON if is_down else 0  # type: ignore
-        else:
-            raise ValueError("Button must be 'left' or 'right'")
-        lparam = win32api.MAKELONG(final_x, final_y)  # type: ignore
-        try:
-            win32gui.PostMessage(hwnd, message, wparam, lparam)  # type: ignore
-            phase = "DOWN" if is_down else "UP"
-            debug_log(LogCategory.MOUSE, f"🕵️ [STEALTH-POSTMSG] {button.title()} {phase} via PostMessage at ({final_x}, {final_y})")
-            if is_down:
-                time.sleep(random.uniform(0.01, 0.03))
-            return True
-        except Exception as e:
-            debug_log(LogCategory.ERROR, f"❌ PostMessage mouse event failed: {e}")
-            return False
-    
     def get_cursor_pos(self) -> Tuple[int, int]:
         """Get current cursor position using Windows API."""
         point = POINT()
@@ -203,58 +131,35 @@ class VirtualMouse:
         return point.x, point.y
     
     def _send_input(self, *inputs):
-        """Simplified input method using basic Windows API calls."""
-        try:
-            debug_log(LogCategory.MOUSE, "🔄 Using simplified mouse API...")
-            
-            for input_struct in inputs:
-                if hasattr(input_struct, '_input') and hasattr(input_struct._input, 'mi'):
-                    mi = input_struct._input.mi
-                    
-                    # Convert absolute coordinates back to screen coordinates
-                    if mi.dwFlags & MOUSEEVENTF_ABSOLUTE:
-                        screen_x = int((mi.dx * self.virtual_width) / 65536) + self.virtual_left
-                        screen_y = int((mi.dy * self.virtual_height) / 65536) + self.virtual_top
-                        
-                        # Ensure coordinates are within screen bounds
-                        screen_x = max(0, min(screen_x, self.virtual_width - 1))
-                        screen_y = max(0, min(screen_y, self.virtual_height - 1))
-                        
-                        if mi.dwFlags & MOUSEEVENTF_MOVE:
-                            # Move cursor
-                            self.user32.SetCursorPos(screen_x, screen_y)
-                            debug_log(LogCategory.MOUSE, f"✅ Moved cursor to ({screen_x}, {screen_y})")
-                        
-                        if mi.dwFlags & MOUSEEVENTF_LEFTDOWN:
-                            # Left mouse down
-                            self.user32.SetCursorPos(screen_x, screen_y)
-                            self.user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-                            debug_log(LogCategory.MOUSE, f"✅ Left mouse down at ({screen_x}, {screen_y})")
-                        
-                        if mi.dwFlags & MOUSEEVENTF_LEFTUP:
-                            # Left mouse up
-                            self.user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-                            debug_log(LogCategory.MOUSE, f"✅ Left mouse up")
-                        
-                        if mi.dwFlags & MOUSEEVENTF_RIGHTDOWN:
-                            # Right mouse down
-                            self.user32.SetCursorPos(screen_x, screen_y)
-                            self.user32.mouse_event(MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0)
-                            debug_log(LogCategory.MOUSE, f"✅ Right mouse down at ({screen_x}, {screen_y})")
-                        
-                        if mi.dwFlags & MOUSEEVENTF_RIGHTUP:
-                            # Right mouse up
-                            self.user32.mouse_event(MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0)
-                            debug_log(LogCategory.MOUSE, f"✅ Right mouse up")
-            
-            debug_log(LogCategory.MOUSE, "✅ Mouse input completed successfully")
-            return len(inputs)
-                            
-        except Exception as e:
-            debug_log(LogCategory.ERROR, f"⚠️ Mouse input failed: {e}")
-            debug_log(LogCategory.ERROR, "❌ All mouse input methods failed")
+        """Return the actual number of events accepted by Windows."""
+        if not inputs:
             return 0
-    
+        try:
+            buffer = (INPUT * len(inputs))(*inputs)
+            ctypes.set_last_error(0)
+            sent = self.user32.SendInput(len(inputs), buffer, ctypes.sizeof(INPUT))
+            if sent != len(inputs):
+                debug_log(LogCategory.ERROR,
+                          f"SendInput accepted {sent}/{len(inputs)} events; "
+                          f"Windows error={ctypes.get_last_error()}. "
+                          "Check focus and run Roblox and the launcher at the same privilege level.")
+            return sent
+        except (OSError, ctypes.ArgumentError) as exc:
+            debug_log(LogCategory.ERROR, f"SendInput failed: {exc}")
+            return 0
+
+    def _target_ready(self, x, y):
+        """Do not press a button in another app or outside the game client."""
+        if not WIN32_AVAILABLE or not self._resolve_window_manager():
+            return False
+        hwnd = self._get_hwnd_func()
+        if not hwnd or win32gui.GetForegroundWindow() != hwnd or win32gui.IsIconic(hwnd):
+            debug_log(LogCategory.ERROR, "Mouse input skipped: bring Roblox to the foreground.")
+            return False
+        cx, cy = win32gui.ScreenToClient(hwnd, (int(x), int(y)))
+        left, top, right, bottom = win32gui.GetClientRect(hwnd)
+        return left <= cx < right and top <= cy < bottom
+
     def _create_mouse_input(self, dx: int, dy: int, flags: int) -> INPUT:
         """Create a mouse input structure."""
         mouse_input = MOUSEINPUT()
@@ -263,7 +168,7 @@ class VirtualMouse:
         mouse_input.mouseData = 0
         mouse_input.dwFlags = flags
         mouse_input.time = 0
-        mouse_input.dwExtraInfo = None
+        mouse_input.dwExtraInfo = 0
         
         input_struct = INPUT()
         input_struct.type = INPUT_MOUSE
@@ -276,8 +181,8 @@ class VirtualMouse:
             debug_log(LogCategory.MOUSE, f"🖱️ [STEALTH] Moving to ({x}, {y})")
             
             # Ensure coordinates are within screen bounds
-            x = max(0, min(x, self.primary_width - 1))
-            y = max(0, min(y, self.primary_height - 1))
+            x = max(self.virtual_left, min(x, self.virtual_left + self.virtual_width - 1))
+            y = max(self.virtual_top, min(y, self.virtual_top + self.virtual_height - 1))
             
             # Use reliable SetCursorPos for movement
             result = self.user32.SetCursorPos(x, y)
@@ -290,259 +195,114 @@ class VirtualMouse:
         except Exception as e:
             debug_log(LogCategory.ERROR, f"❌ Move failed to ({x}, {y}): {e}")
     
-    def smooth_move_to(self, x: int, y: int, duration: float = 0.3):
-        """Move mouse smoothly to coordinates for more human-like movement."""
+    def smooth_move_to(self, x: int, y: int, duration: float = 0.22):
+        """Fast interpolated movement; never fall back to teleporting on failure."""
+        point = POINT()
+        if not self.user32.GetCursorPos(ctypes.byref(point)):
+            return False
+        steps = max(8, round(max(0, duration) * 60))
+        for step in range(1, steps + 1):
+            progress = step / steps
+            eased = progress * progress * (3 - 2 * progress)
+            px = round(point.x + (x - point.x) * eased)
+            py = round(point.y + (y - point.y) * eased)
+            if not self.user32.SetCursorPos(px, py):
+                return False
+            time.sleep(max(0, duration) / steps)
+        return True
+
+    def _prepare_click(self, x, y):
+        """Move first, allow the game to update hover, then recheck focus."""
+        if not self._target_ready(x, y):
+            return False
+        if not self.smooth_move_to(x, y, duration=0.22):
+            return False
+        time.sleep(0.15)
+        return self._target_ready(x, y)
+
+    def _press_button(self, button):
+        flags = {'left': MOUSEEVENTF_LEFTDOWN, 'right': MOUSEEVENTF_RIGHTDOWN}
+        if button not in flags:
+            raise ValueError("Button must be 'left' or 'right'")
+        return self._send_input(self._create_mouse_input(0, 0, flags[button])) == 1
+
+    def cast_hold(self, x, y, duration=0.93, observe=None):
+        """A settled left-button hold, with movement separate from button input."""
+        if not self._target_ready(x, y):
+            return False
+        # Clear a leftover synthetic hold before beginning a new cast.
+        if not self.mouse_up(x, y, 'left'):
+            return False
+        if not self._prepare_click(x, y):
+            print("Cast input failed: movement or foreground check failed.")
+            return False
+        if not self._press_button('left'):
+            return False
         try:
-            # Get current mouse position
-            current_pos = POINT()
-            self.user32.GetCursorPos(ctypes.byref(current_pos))
-            
-            start_x, start_y = current_pos.x, current_pos.y
-            target_x, target_y = x, y
-            
-            # Calculate steps for smooth movement
-            steps = max(10, int(duration * 60))  # 60 FPS smoothness
-            step_delay = duration / steps
-            
-            for i in range(steps + 1):
-                progress = i / steps
-                # Use easing function for more natural movement
-                ease_progress = progress * progress * (3 - 2 * progress)  # Smoothstep
-                
-                current_x = int(start_x + (target_x - start_x) * ease_progress)
-                current_y = int(start_y + (target_y - start_y) * ease_progress)
-                
-                self.user32.SetCursorPos(current_x, current_y)
-                
-                if i < steps:  # Don't sleep on last iteration
-                    time.sleep(step_delay)
-                    
-            debug_log(LogCategory.MOUSE, f"✅ Smooth move completed to ({x}, {y})")
-                    
-        except Exception as e:
-            debug_log(LogCategory.ERROR, f"❌ Smooth move failed to ({x}, {y}): {e}")
-            # Fallback to regular move
-            self.move_to(x, y)
-    
+            # Give Windows time to update its asynchronous button state.
+            time.sleep(0.03)
+            held = bool(self.user32.GetAsyncKeyState(0x01) & 0x8000)
+            print(f"Cast input: left DOWN accepted; Windows held={held}; hold={duration:.2f}s")
+            if observe is None:
+                time.sleep(max(0, duration - 0.03))
+            else:
+                # Observe while the button is down: the meter disappears on release.
+                deadline = time.monotonic() + max(0, duration - 0.03)
+                while True:
+                    observe()
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        break
+                    time.sleep(min(0.05, remaining))
+        finally:
+            released = self.mouse_up(x, y, 'left')
+            print(f"Cast input: left UP accepted={released}")
+        return held and released
+
+    def relative_drag(self, x, y, dx, dy, button='right', duration=0.8):
+        """Relative motion works with games that lock/recenter the cursor."""
+        if not self.mouse_down(x, y, button):
+            return False
+        moved = True
+        try:
+            steps = max(1, int(duration * 60))
+            previous_x = previous_y = 0
+            for i in range(1, steps + 1):
+                if not self._target_ready(x, y):
+                    moved = False
+                    break
+                next_x, next_y = round(dx*i/steps), round(dy*i/steps)
+                event = self._create_mouse_input(next_x-previous_x, next_y-previous_y, MOUSEEVENTF_MOVE)
+                if self._send_input(event) != 1:
+                    moved = False
+                    break
+                previous_x, previous_y = next_x, next_y
+                time.sleep(max(0, duration)/steps)
+        finally:
+            released = self.mouse_up(x, y, button)
+        return moved and released
+
     def ultimate_stealth_click(self, x: int, y: int, button: str = 'left', duration: float = 0.05):
-        """
-        ULTIMATE STEALTH CLICK: Automatically chooses the best clicking method.
-        Priority: PostMessage stealth > Regular enhanced click
-        """
-        try:
-            # Try to get Roblox window handle for stealth clicking
-            if WIN32_AVAILABLE and self._resolve_window_manager() and self._get_hwnd_func is not None:
-                hwnd = self._get_hwnd_func()
-                if hwnd:
-                    client_coords = self._screen_to_client(hwnd, x, y)
-                    if client_coords is not None:
-                        client_x, client_y = client_coords
-                        debug_log(LogCategory.MOUSE, f"🎯 [ULTIMATE-STEALTH] Using PostMessage stealth click @ client ({client_x},{client_y})")
-                        if self.stealth_click_window(hwnd, client_x, client_y, button, duration=duration):
-                            return True
-                        debug_log(LogCategory.MOUSE, "⚠️ PostMessage sequence reported failure, falling back to hardware click")
-                else:
-                    debug_log(LogCategory.MOUSE, "⚠️ Roblox window handle unavailable, using enhanced click")
-            
-            # Fallback to regular enhanced clicking
-            debug_log(LogCategory.MOUSE, f"🎯 [ULTIMATE-STEALTH] Using enhanced hardware click as fallback")
-            return self.click_at(x, y, button, duration)
-            
-        except Exception as e:
-            debug_log(LogCategory.ERROR, f"❌ Ultimate stealth click failed: {e}")
-            return False
-    
+        """Compatibility alias for callers using the previous method name."""
+        return self.click_at(x, y, button, duration)
+
     def click_at(self, x: int, y: int, button: str = 'left', duration: float = 0.05):
-        """
-        Enhanced stealth click method with AHK-style window focus.
-        Based on Reddit post: Window focus before clicking is CRITICAL for Roblox automation.
-        """
-        try:
-            debug_log(LogCategory.MOUSE, f"🎯 [ULTRA-STEALTH] Initiating enhanced click at ({x}, {y})")
-            
-            # CRITICAL: Ensure Roblox window is focused before clicking (AHK-style)
-            # This was the key insight from the Reddit post that made automation work
-            self._ensure_window_focus_before_click()
-            
-            # Ensure coordinates are within screen bounds
-            x = max(0, min(x, self.primary_width - 1))
-            y = max(0, min(y, self.primary_height - 1))
-            
-            # Get current mouse position for natural movement
-            current_pos = POINT()
-            self.user32.GetCursorPos(ctypes.byref(current_pos))
-            start_x, start_y = current_pos.x, current_pos.y
-            
-            # Add stronger anti-detection randomization
-            import random
-            jitter_x = random.randint(-5, 5)  # Increased jitter range
-            jitter_y = random.randint(-5, 5)
-            final_x = max(0, min(x + jitter_x, self.primary_width - 1))
-            final_y = max(0, min(y + jitter_y, self.primary_height - 1))
-            
-            # Phase 1: Natural approach movement (critical for anti-detection)
-            distance = ((final_x - start_x) ** 2 + (final_y - start_y) ** 2) ** 0.5
-            if distance > 10:  # Only do approach if movement is significant
-                # Calculate intermediate positions for human-like movement
-                approach_distance = random.randint(15, 35)  # Distance from target for approach
-                angle = random.uniform(0, 2 * 3.14159)  # Random approach angle
-                
-                approach_x = final_x + int(approach_distance * math.cos(angle))
-                approach_y = final_y + int(approach_distance * math.sin(angle))
-                
-                # Ensure approach point is on screen
-                approach_x = max(0, min(approach_x, self.primary_width - 1))
-                approach_y = max(0, min(approach_y, self.primary_height - 1))
-                
-                debug_log(LogCategory.MOUSE, f"🛡️ [ULTRA-STEALTH] Natural approach via ({approach_x}, {approach_y})")
-                
-                # Move to approach position with human-like curve
-                self.human_like_move(start_x, start_y, approach_x, approach_y, random.uniform(0.2, 0.5))
-                
-                # Brief pause at approach position (human hesitation)
-                time.sleep(random.uniform(0.1, 0.3))
-                
-                # Final approach to target with slight curve
-                self.human_like_move(approach_x, approach_y, final_x, final_y, random.uniform(0.1, 0.25))
-            else:
-                # Short distance - just add slight randomized movement
-                self.user32.SetCursorPos(final_x, final_y)
-            
-            # Phase 2: Pre-click stabilization (critical anti-detection)
-            time.sleep(random.uniform(0.05, 0.15))  # Human stabilization delay
-            
-            # Phase 3: Enhanced click execution with variable timing
-            click_duration = duration + random.uniform(-0.03, 0.08)  # More variable duration
-            click_duration = max(0.02, click_duration)  # Minimum reasonable duration
-            
-            if button == 'left':
-                debug_log(LogCategory.MOUSE, f"🛡️ [ULTRA-STEALTH] Hardware left click (duration: {click_duration:.3f}s)")
-                self.user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-                time.sleep(click_duration)
-                self.user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-                
-            elif button == 'right':
-                debug_log(LogCategory.MOUSE, f"🛡️ [ULTRA-STEALTH] Hardware right click (duration: {click_duration:.3f}s)")
-                self.user32.mouse_event(MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0)
-                time.sleep(click_duration)
-                self.user32.mouse_event(MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0)
-                
-            else:
-                raise ValueError("Button must be 'left' or 'right'")
-            
-            # Phase 4: Post-click natural behavior
-            post_click_delay = random.uniform(0.1, 0.4)  # Human post-click delay
-            time.sleep(post_click_delay)
-            
-            # Optional: Small post-click movement to simulate natural mouse behavior
-            if random.choice([True, False]):  # 50% chance of small post-click movement
-                small_move_x = final_x + random.randint(-3, 3)
-                small_move_y = final_y + random.randint(-3, 3)
-                small_move_x = max(0, min(small_move_x, self.primary_width - 1))
-                small_move_y = max(0, min(small_move_y, self.primary_height - 1))
-                self.user32.SetCursorPos(small_move_x, small_move_y)
-                debug_log(LogCategory.MOUSE, f"🛡️ [ULTRA-STEALTH] Natural post-click movement to ({small_move_x}, {small_move_y})")
-            
-            debug_log(LogCategory.MOUSE, f"✅ [ULTRA-STEALTH] Enhanced click sequence completed at ({final_x}, {final_y})")
-            return True
-            
-        except Exception as e:
-            debug_log(LogCategory.ERROR, f"❌ Enhanced click failed at ({x}, {y}): {e}")
+        """Press, hold, and always attempt release, even if the wait is interrupted."""
+        if not self._prepare_click(x, y) or not self._press_button(button):
             return False
-    
+        try:
+            time.sleep(max(0.05, duration))
+        finally:
+            released = self.mouse_up(x, y, button)
+        return released
+
     def stealth_click_window(self, hwnd, x: int, y: int, button: str = 'left', *, duration: float = 0.05):
-        """
-        ULTIMATE STEALTH: PostMessage clicking that bypasses anti-cheat.
-        Key insight: Click BEFORE bringing window to front = Undetectable
-        This method clicks while window is in background, then optionally brings to front.
-        """
-        if not WIN32_AVAILABLE:
-            debug_log(LogCategory.ERROR, "❌ Win32 API not available for stealth clicking")
+        """Compatibility for client-coordinate callers; requires the foreground target."""
+        if not WIN32_AVAILABLE or win32gui.GetForegroundWindow() != hwnd:
             return False
-            
-        try:
-            debug_log(LogCategory.MOUSE, f"🕵️ [STEALTH-CLICK] PostMessage click at ({x}, {y}) in background window")
-            
-            # Convert screen coordinates to window client coordinates
-            # Note: For PostMessage, we might need to adjust coordinates based on window position
-            
-            if not WIN32_AVAILABLE:
-                debug_log(LogCategory.ERROR, "Win32 API not available for PostMessage clicks")
-                return
-            
-            client_rect = win32gui.GetClientRect(hwnd)  # type: ignore
-            client_width = max(1, client_rect[2])
-            client_height = max(1, client_rect[3])
+        sx, sy = win32gui.ClientToScreen(hwnd, (x, y))
+        return self.click_at(sx, sy, button, duration)
 
-            # Boundary-safe jitter
-            jitter_x = random.randint(-2, 2)
-            jitter_y = random.randint(-2, 2)
-            base_x = max(0, min(x + jitter_x, client_width - 1))
-            base_y = max(0, min(y + jitter_y, client_height - 1))
-
-            # Generate a brief pre-move path to mimic hover behavior
-            move_steps = random.randint(2, 4)
-            move_points = []
-            for _ in range(move_steps - 1):
-                offset_x = random.randint(-8, 8)
-                offset_y = random.randint(-6, 6)
-                move_points.append((
-                    max(0, min(base_x + offset_x, client_width - 1)),
-                    max(0, min(base_y + offset_y, client_height - 1))
-                ))
-            move_points.append((base_x, base_y))
-
-            # Dispatch WM_MOUSEMOVE trail with subtle timing jitter
-            for idx, (mx, my) in enumerate(move_points):
-                lparam_move = win32api.MAKELONG(mx, my)  # type: ignore
-                win32gui.PostMessage(hwnd, win32con.WM_MOUSEMOVE, 0, lparam_move)  # type: ignore
-                debug_log(LogCategory.MOUSE, f"🕵️ [STEALTH-CLICK] Move {idx+1}/{len(move_points)} -> ({mx},{my})")
-                time.sleep(random.uniform(0.008, 0.025))
-
-            hold_time = max(0.015, duration + random.uniform(-0.02, 0.06))
-            lParam_click = win32api.MAKELONG(base_x, base_y)  # type: ignore
-
-            if button == 'left':
-                debug_log(LogCategory.MOUSE, f"🕵️ [STEALTH-CLICK] Background left click via PostMessage (hold {hold_time:.3f}s)")
-                win32gui.PostMessage(hwnd, win32con.WM_LBUTTONDOWN, win32con.MK_LBUTTON, lParam_click)  # type: ignore
-                time.sleep(hold_time)
-                win32gui.PostMessage(hwnd, win32con.WM_LBUTTONUP, 0, lParam_click)  # type: ignore
-
-            elif button == 'right':
-                debug_log(LogCategory.MOUSE, f"🕵️ [STEALTH-CLICK] Background right click via PostMessage (hold {hold_time:.3f}s)")
-                win32gui.PostMessage(hwnd, win32con.WM_RBUTTONDOWN, win32con.MK_RBUTTON, lParam_click)  # type: ignore
-                time.sleep(hold_time)
-                win32gui.PostMessage(hwnd, win32con.WM_RBUTTONUP, 0, lParam_click)  # type: ignore
-            else:
-                raise ValueError("Button must be 'left' or 'right'")
-
-            # Optional micro-adjustment after click to emulate natural cursor drift
-            if random.random() < 0.6:
-                drift_x = max(0, min(base_x + random.randint(-3, 3), client_width - 1))
-                drift_y = max(0, min(base_y + random.randint(-3, 3), client_height - 1))
-                win32gui.PostMessage(hwnd, win32con.WM_MOUSEMOVE, 0, win32api.MAKELONG(drift_x, drift_y))  # type: ignore
-                time.sleep(random.uniform(0.01, 0.03))
-
-            # Sporadically fall back to a tiny hardware tap to diversify signature
-            if random.random() < 0.15:
-                screen_pos = win32gui.ClientToScreen(hwnd, (base_x, base_y))  # type: ignore
-                self.user32.mouse_event(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK,
-                                        int((screen_pos[0] - self.virtual_left) * 65536 / self.virtual_width),
-                                        int((screen_pos[1] - self.virtual_top) * 65536 / self.virtual_height), 0, 0)
-                self.user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-                time.sleep(random.uniform(0.01, 0.025))
-                self.user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-                debug_log(LogCategory.MOUSE, "🛡️ [STEALTH-CLICK] Injected micro hardware tap for variability")
-
-            time.sleep(random.uniform(0.02, 0.05))
-            
-            debug_log(LogCategory.MOUSE, f"✅ [STEALTH-CLICK] PostMessage click completed successfully")
-            return True
-            
-        except Exception as e:
-            debug_log(LogCategory.ERROR, f"❌ Stealth click failed: {e}")
-            return False
-    
     def human_like_move(self, start_x: int, start_y: int, end_x: int, end_y: int, duration: float = 0.3):
         """Move mouse with human-like curved path and variable speed."""
         try:
@@ -581,8 +341,8 @@ class VirtualMouse:
                         current_y += perp_y * curve_offset * 20
                 
                 # Ensure coordinates are valid
-                current_x = int(max(0, min(current_x, self.primary_width - 1)))
-                current_y = int(max(0, min(current_y, self.primary_height - 1)))
+                current_x = int(max(self.virtual_left, min(current_x, self.virtual_left + self.virtual_width - 1)))
+                current_y = int(max(self.virtual_top, min(current_y, self.virtual_top + self.virtual_height - 1)))
                 
                 self.user32.SetCursorPos(current_x, current_y)
                 
@@ -623,67 +383,29 @@ class VirtualMouse:
         self.mouse_up(end_x, end_y, 'left')
     
     def mouse_down(self, x: int, y: int, button: str = 'left'):
-        """Press mouse button down at specified coordinates."""
-        if self._postmessage_mouse_event(x, y, button, True):
-            return True
-        if button == 'left':
-            flag = MOUSEEVENTF_LEFTDOWN
-        elif button == 'right':
-            flag = MOUSEEVENTF_RIGHTDOWN
-        else:
+        """Move and press using physical coordinates on the virtual desktop."""
+        flags = {'left': MOUSEEVENTF_LEFTDOWN, 'right': MOUSEEVENTF_RIGHTDOWN}
+        if button not in flags:
             raise ValueError("Button must be 'left' or 'right'")
-        virtual_x = x - self.virtual_left
-        virtual_y = y - self.virtual_top
-        abs_x = int((virtual_x * 65535) / self.virtual_width)
-        abs_y = int((virtual_y * 65535) / self.virtual_height)
-        debug_log(LogCategory.MOUSE, "⚙️ Falling back to hardware mouse down event")
-        down_input = self._create_mouse_input(abs_x, abs_y, flag | MOUSEEVENTF_ABSOLUTE)
-        self._send_input(down_input)
-        return True
-    
+        if not self._target_ready(x, y):
+            return False
+        left, top, width, height = (self.user32.GetSystemMetrics(i) for i in (76,77,78,79))
+        if width <= 0 or height <= 0 or not (left <= x < left+width and top <= y < top+height):
+            return False
+        # Map pixel centers into SendInput's 0..65535 virtual-desktop space.
+        dx = min(65535, int(((x-left)+0.5)*65536/width))
+        dy = min(65535, int(((y-top)+0.5)*65536/height))
+        event = self._create_mouse_input(dx, dy, flags[button] | MOUSEEVENTF_MOVE |
+                                         MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK)
+        return self._send_input(event) == 1
+
     def mouse_up(self, x: int, y: int, button: str = 'left'):
-        """Release mouse button at specified coordinates."""
-        if self._postmessage_mouse_event(x, y, button, False):
-            return True
-        if button == 'left':
-            flag = MOUSEEVENTF_LEFTUP
-        elif button == 'right':
-            flag = MOUSEEVENTF_RIGHTUP
-        else:
+        """Release without moving the cursor, even if focus changed during a hold."""
+        flags = {'left': MOUSEEVENTF_LEFTUP, 'right': MOUSEEVENTF_RIGHTUP}
+        if button not in flags:
             raise ValueError("Button must be 'left' or 'right'")
-        virtual_x = x - self.virtual_left
-        virtual_y = y - self.virtual_top
-        abs_x = int((virtual_x * 65535) / self.virtual_width)
-        abs_y = int((virtual_y * 65535) / self.virtual_height)
-        debug_log(LogCategory.MOUSE, "⚙️ Falling back to hardware mouse up event")
-        up_input = self._create_mouse_input(abs_x, abs_y, flag | MOUSEEVENTF_ABSOLUTE)
-        self._send_input(up_input)
-        return True
-
-    def _ensure_window_focus_before_click(self):
-        """
-        Ensure Roblox window is properly focused before clicking.
-        
-        Based on Reddit post: This AHK-style window focus is CRITICAL for Roblox automation.
-        Without proper focus, clicks are detected/blocked by Roblox anti-automation.
-        """
-        try:
-            if not self._resolve_window_manager() or self._ensure_focus_func is None:
-                debug_log(LogCategory.MOUSE, "⚠️ Window Manager not available - skipping focus")
-                return
-            focus_success = self._ensure_focus_func()
-            
-            if focus_success:
-                debug_log(LogCategory.MOUSE, "✅ [AHK-STYLE] Window focus confirmed before click")
-                # Small delay to let focus settle (critical for automation detection)
-                time.sleep(0.05)
-            else:
-                debug_log(LogCategory.MOUSE, "⚠️ [AHK-STYLE] Window focus may have failed - proceeding anyway")
-                
-        except Exception as e:
-            debug_log(LogCategory.ERROR, f"Window focus error: {e}")
-            # Continue with click even if focus fails
-
+        event = self._create_mouse_input(0, 0, flags[button])
+        return self._send_input(event) == 1
 
 # Global instance for easy access
 virtual_mouse = VirtualMouse()

@@ -1,3 +1,10 @@
+import sys
+
+# Redirected Windows output may use an encoding without emoji support.
+for stream in (sys.stdout, sys.stderr):
+    if hasattr(stream, "reconfigure"):
+        stream.reconfigure(errors="replace")
+
 import os
 import re
 import shlex
@@ -6,6 +13,7 @@ import json
 import shutil
 import zipfile
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Optional
 from urllib.request import Request, urlopen
@@ -16,7 +24,7 @@ REPO_NAME = "Blox_Fruit_Fishing"
 VERSION_FILE = Path("version.txt")
 UPDATES_DIR = Path("updates")
 HEADERS = {"User-Agent": "BloxFruitLauncher"}
-MIN_PYTHON = (3, 8)
+MIN_PYTHON = (3, 10)
 DEFAULT_REQUIREMENTS = [
     "customtkinter>=5.2.2",
     "pillow>=11.1.0",
@@ -101,7 +109,7 @@ def acquire_python_command() -> tuple[list[str], bool, str, tuple[int, int, int]
             continue
 
     raise RuntimeError(
-        "Unable to locate a working Python interpreter. Install Python 3.8+ or create a "
+        "Unable to locate a working Python interpreter. Install Python 3.10+ or create a "
         "virtual environment in this folder."
     )
 
@@ -168,13 +176,27 @@ def download_release(tag: str, destination: Path) -> bool:
 
 def extract_archive(archive: Path, extract_to: Path) -> Optional[Path]:
     try:
+        extract_to.mkdir(parents=True, exist_ok=True)
+        staging = Path(tempfile.mkdtemp(prefix="release-", dir=extract_to))
         with zipfile.ZipFile(archive, "r") as zf:
-            zf.extractall(extract_to)
+            for member in zf.infolist():
+                target = (staging / member.filename).resolve()
+                if not target.is_relative_to(staging.resolve()):
+                    raise ValueError("Archive path escapes the release directory")
+            zf.extractall(staging)
         # GitHub archives expand into a folder named repo-tag
-        inner_dirs = [p for p in extract_to.iterdir() if p.is_dir()]
-        return inner_dirs[0] if inner_dirs else None
-    except (zipfile.BadZipFile, OSError, IndexError):
+        inner_dirs = [p for p in staging.iterdir() if p.is_dir()]
+        if len(inner_dirs) != 1 or not (inner_dirs[0] / "Main.py").is_file():
+            return None
+        return inner_dirs[0]
+    except (zipfile.BadZipFile, OSError, ValueError):
         return None
+
+
+def version_key(value: str):
+    """Compare numeric releases independently of V/v prefixes."""
+    match = re.fullmatch(r"[vV]?(\d+)\.(\d+)\.(\d+)", value.strip())
+    return tuple(map(int, match.groups())) if match else None
 
 
 def copy_tree(src: Path, dst: Path, exclude: Optional[set] = None) -> None:
@@ -192,6 +214,9 @@ def copy_tree(src: Path, dst: Path, exclude: Optional[set] = None) -> None:
 
 def check_for_updates() -> None:
     print("[STEP 0] Checking for updates...")
+    if Path(".git").exists():
+        print("   Source checkout: update with Git to preserve local changes.")
+        return
     local_version = read_local_version()
     release = get_latest_release()
     if not release:
@@ -206,7 +231,11 @@ def check_for_updates() -> None:
     if is_prerelease:
         print("   Release type: pre-release")
 
-    if local_version == latest_version:
+    local_key, latest_key = version_key(local_version), version_key(latest_version)
+    if latest_key is None:
+        print("   Release tag is not a stable version; skipping automatic update.")
+        return
+    if local_key is not None and local_key >= latest_key:
         print(f" ✅ You already have the latest version ({local_version}).")
         return
 
@@ -232,6 +261,8 @@ def check_for_updates() -> None:
         archive_path.unlink(missing_ok=True)
         return
 
+    # The archive may carry an outdated version file, including in test copies.
+    (extracted_folder / "version.txt").write_text(latest_version, encoding="utf-8")
     print(f"\n 📁 Latest version extracted to: {extracted_folder}")
     decision = input(
         "\nWould you like to test the new version before replacing the current install? (Y/N): "
@@ -281,7 +312,7 @@ def ensure_requirements(pip_cmd: list[str]) -> None:
         print(" ✅ Created basic requirements.txt")
 
     print(" Installing/updating dependencies...")
-    result = subprocess.run(pip_cmd + ["install", "-r", "requirements.txt", "--upgrade"], check=False)
+    result = subprocess.run(pip_cmd + ["install", "-r", "requirements.txt"], check=False)
     if result.returncode != 0:
         print(" ❌ Failed to install some dependencies. Attempting core packages individually...")
         core_result = subprocess.run(pip_cmd + ["install", "opencv-python", "numpy", "pillow"], check=False)
@@ -299,7 +330,7 @@ def run_quick_tests(python_cmd: list[str]) -> bool:
         return True
 
     print(" Running quick diagnostic tests...")
-    result = subprocess.run(python_cmd + [str(quick_test)], check=False)
+    result = subprocess.run(python_cmd + ["-X", "utf8", str(quick_test)], check=False)
     if result.returncode == 0:
         print(" ✅ ALL TESTS PASSED - System is ready!\n")
         return True
@@ -342,6 +373,8 @@ def launch_main_app(python_cmd: list[str]) -> None:
 
 
 def main() -> None:
+    from Admin_Launch import ensure_admin
+    ensure_admin()
     print_header()
     ensure_working_directory()
     check_for_updates()

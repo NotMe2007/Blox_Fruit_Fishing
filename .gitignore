@@ -17,3 +17,8 @@ ANTI_DETECTION_GUIDE.md
 Run_Me.bat.bak
 .github/copilot-instructions.md
 /build/Launcher
+
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/

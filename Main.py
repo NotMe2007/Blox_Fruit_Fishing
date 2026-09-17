@@ -1,3 +1,17 @@
+import sys
+
+if __name__ == "__main__":
+    from Admin_Launch import ensure_admin
+    ensure_admin()
+
+# Redirected Windows output may use an encoding without emoji support.
+for stream in (sys.stdout, sys.stderr):
+    if hasattr(stream, "reconfigure"):
+        stream.reconfigure(errors="replace")
+
+from Logic.BackGround_Logic.Display_Utils import enable_dpi_awareness
+enable_dpi_awareness()
+
 # type: ignore
 import os
 import sys

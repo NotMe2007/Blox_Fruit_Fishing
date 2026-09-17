@@ -66,34 +66,24 @@ def get_detector_module():
 
 
 def screen_region_image():
-    """Capture a screenshot of the fishing rod detection region."""
-    left = max(0, TOP_LEFT[0])
-    top = max(0, TOP_LEFT[1])
-    right = max(left + 1, BOTTOM_RIGHT[0])
-    bottom = max(top + 1, BOTTOM_RIGHT[1])
-    w = right - left
-    h = bottom - top
-    # Use Windows API screen capture instead of PyAutoGUI
+    """Capture the current Roblox hotbar, never a fixed desktop location."""
     try:
-        from .Screen_Capture import screenshot
-        pil_img = screenshot(region=(left, top, w, h))
-        if pil_img is None:
-            raise Exception("Screen capture failed")
-    except:
-        # Final fallback - try to use PIL directly
-        try:
-            from PIL import ImageGrab
-            pil_img = ImageGrab.grab(bbox=(left, top, left + w, top + h))
-        except Exception as e:
-            print(f"Screenshot capture failed: {e}")
-            # Return dummy image to prevent crashes
-            img = np.zeros((h, w, 3), dtype=np.uint8)
-            gray = np.zeros((h, w), dtype=np.uint8)
-            return img, gray, left, top
-    
+        from .Display_Utils import hotbar_region
+        from .Screen_Capture import screenshot as capture
+        from .Window_Manager import get_roblox_window_region as client_region
+    except ImportError:
+        from Display_Utils import hotbar_region
+        from Screen_Capture import screenshot as capture
+        from Window_Manager import get_roblox_window_region as client_region
+    window_region = client_region()
+    if window_region is None:
+        raise RuntimeError("Roblox must be visible and not minimized")
+    left, top, width, height = hotbar_region(window_region)
+    pil_img = capture(region=(left, top, width, height))
+    if pil_img is None:
+        raise RuntimeError("Cannot capture Roblox hotbar; keep the window fully on screen")
     img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    return img, gray, left, top
+    return img, cv2.cvtColor(img, cv2.COLOR_BGR2GRAY), left, top
 
 
 def smooth_move_to(target_x, target_y, duration=None):
@@ -165,9 +155,6 @@ IMAGES_DIR = Path(__file__).parent.parent.parent / 'Images'
 UN_PATH = IMAGES_DIR / 'Basic_Fishing_UN.png'
 EQ_PATH = IMAGES_DIR / 'Basic_Fishing_EQ.png'
 # Region to check within the Roblox window: top-left and bottom-right offsets (inclusive)
-TOP_LEFT = (725, 1004)
-BOTTOM_RIGHT = (1224, 1079)
-BOTTOM_RIGHT = (1224, 1079)
 threshold = 0.58   # matching threshold (0-1). Tuned to reduce lighting false positives
 debug = True       # set True to print info and save debug image
 
@@ -190,13 +177,13 @@ def load_templates():
     
     if not un_valid or not eq_valid:
         print(f"Error: Could not load template images. Looking for:\n  {UN_PATH}\n  {EQ_PATH}")
-        sys.exit(1)
+        raise FileNotFoundError("Fishing rod templates are missing or unreadable")
     return cv2.cvtColor(un_color, cv2.COLOR_BGR2GRAY), cv2.cvtColor(eq_color, cv2.COLOR_BGR2GRAY) # type: ignore
 
 
 def multi_scale_match(screenshot_gray, template_gray, scales=None):
     if scales is None:
-        scales = np.linspace(0.8, 1.2, 21)
+        scales = np.unique(np.concatenate((np.linspace(0.5, 2.0, 31), [1.0])))
 
     best_val = -1.0
     best_loc = None
@@ -221,7 +208,7 @@ def multi_scale_match(screenshot_gray, template_gray, scales=None):
     for scale in scales:
         new_w = max(1, int(tw * scale))
         new_h = max(1, int(th * scale))
-        if new_h >= sh or new_w >= sw:
+        if new_h > sh or new_w > sw:
             continue
 
         templ_resized = cv2.resize(template_gray, (new_w, new_h), interpolation=cv2.INTER_AREA)
@@ -295,6 +282,93 @@ def _compute_letter_similarity(screenshot_gray, match_loc, match_size, template_
         return None
 
 
+def _has_equipped_border(image, location, size):
+    """EQ requires the cyan selection border, not grayscale background similarity."""
+    if location is None or size is None:
+        return False
+    x, y = map(int, location)
+    w, h = map(int, size)
+    crop = image[max(0,y):y+h, max(0,x):x+w]
+    if crop.size == 0 or min(crop.shape[:2]) < 5:
+        return False
+    b, g, r = cv2.split(crop.astype(np.float32))
+    cyan = (b > 130) & (g > 130) & (b > r*1.2) & (g > r*1.2) & (np.abs(b-g) < 90)
+    thickness = max(2, round(w*0.1))
+    edges = [cyan[:, :thickness], cyan[:, -thickness:], cyan[-max(2,round(h*0.18)):, :]]
+    return sum(float(edge.mean()) >= 0.25 for edge in edges) >= 2
+
+
+def inspect_rod():
+    """Read rod state and current screen position without clicking."""
+    image, gray, left, top = screen_region_image()
+    un, eq = load_templates()
+    matches = [multi_scale_match(gray, template) for template in (un, eq)]
+    score, loc, scale, size = max(matches, key=lambda match: match[0])
+    if score < threshold or loc is None or size is None:
+        return None
+    equipped = _has_equipped_border(image, loc, size)
+    return equipped, (left+loc[0]+size[0]//2, top+loc[1]+size[1]//2)
+
+
+def ensure_rod_equipped():
+    """At most one equip click; all confirmation polls are read-only."""
+    state = inspect_rod()
+    if state is None:
+        return False
+    if state[0]:
+        return True
+    # Recheck before clicking to avoid acting on a single uncertain frame.
+    time.sleep(0.15)
+    state = inspect_rod()
+    if state is None:
+        return False
+    if state[0]:
+        return True
+    if virtual_mouse is None or not virtual_mouse.click_at(*state[1]):
+        return False
+    for _ in range(15):
+        time.sleep(0.2)
+        state = inspect_rod()
+        if state is not None and state[0]:
+            time.sleep(0.4)
+            return True
+    print("Equip not confirmed; no additional toggle sent.")
+    return False
+
+
+def reset_rod():
+    """Unequip, verify, equip, verify. Refresh the position before each click."""
+    if virtual_mouse is None:
+        return False
+    try:
+        state = inspect_rod()
+        if state is None:
+            return False
+        def wait_for(expected):
+            for _ in range(12):
+                time.sleep(0.15)
+                current = inspect_rod()
+                if current is not None and current[0] is expected:
+                    return current
+            return None
+        if state[0]:
+            if not virtual_mouse.click_at(*state[1]):
+                return False
+            state = wait_for(False)
+            if state is None:
+                return False
+        if not virtual_mouse.click_at(*state[1]):
+            return False
+        if wait_for(True) is None:
+            return False
+        time.sleep(0.4)
+        print("Rod reset verified: unequipped, then equipped.")
+        return True
+    except Exception as exc:
+        print(f"Rod reset failed: {exc}")
+        return False
+
+
 def check_region_and_act():
     """
     Check the fishing rod region and take appropriate action.
@@ -304,48 +378,6 @@ def check_region_and_act():
         False: EQ (equipped) rod detected - ready to fish
         None: No clear detection
     """
-    # Quick validation - check if Roblox window is available (but don't require foreground)
-    try:
-        foreground_hwnd = win32gui.GetForegroundWindow()
-        foreground_title = win32gui.GetWindowText(foreground_hwnd).lower()
-        
-        # Only warn if Roblox not in foreground, but don't skip detection
-        if 'roblox' not in foreground_title:
-            # Check if Roblox window exists at all
-            roblox_found = False
-            def enum_windows_callback(hwnd, windows):
-                if win32gui.IsWindowVisible(hwnd):
-                    title = win32gui.GetWindowText(hwnd).lower()
-                    
-                    # Only accept actual Roblox application windows, not browser tabs
-                    if 'roblox' in title and not any(browser in title for browser in ['opera', 'chrome', 'firefox', 'edge', 'safari', 'brave']):
-                        # Additional check: try to verify it's the actual Roblox process
-                        try:
-                            import win32process
-                            import psutil
-                            _, pid = win32process.GetWindowThreadProcessId(hwnd)
-                            process = psutil.Process(pid)
-                            process_name = process.name().lower()
-                            
-                            if 'roblox' in process_name or 'robloxplayerbeta' in process_name:
-                                windows.append((hwnd, title))
-                        except (ImportError, Exception):
-                            # Fallback: accept if title looks like Roblox app (not browser)
-                            if 'browser' not in title:
-                                windows.append((hwnd, title))
-                return True
-            
-            windows = []
-            win32gui.EnumWindows(enum_windows_callback, windows)
-            
-            if not windows:
-                print("WARNING: No Roblox window found. Skipping rod detection.")
-                return None
-            # Continue with detection even if not in foreground
-    except Exception as e:
-        print(f"Error checking window state: {e}")
-        # Continue anyway - don't let window check failure stop detection
-    
     try:
         un_gray, eq_gray = load_templates()
     except Exception as e:
@@ -353,50 +385,9 @@ def check_region_and_act():
         return None
 
     try:
-        base_left = 0
-        base_top = 0
-
-        if WINDOW_MANAGER_AVAILABLE and get_roblox_window_region is not None:
-            window_region = get_roblox_window_region()
-            if window_region:
-                win_left, win_top, _, _ = window_region
-                base_left = int(win_left)
-                base_top = int(win_top)
-
-        left = max(0, base_left + TOP_LEFT[0])
-        top = max(0, base_top + TOP_LEFT[1])
-
-        try:
-            import ctypes
-            user32 = ctypes.windll.user32
-            screen_w = user32.GetSystemMetrics(0)
-            screen_h = user32.GetSystemMetrics(1)
-        except Exception:
-            screen_w, screen_h = 1920, 1080  # Sensible fallback for single-monitor setups
-
-        right = min(screen_w, base_left + BOTTOM_RIGHT[0])
-        bottom = min(screen_h, base_top + BOTTOM_RIGHT[1])
-        w = max(1, right - left)
-        h = max(1, bottom - top)
-        region = (left, top, w, h)
-
-        time.sleep(0.05)
-
-        try:
-            from .Screen_Capture import screenshot
-            pil_img = screenshot(region=region)
-            if pil_img is None:
-                raise RuntimeError("Screen capture failed")
-        except Exception:
-            try:
-                from PIL import ImageGrab
-                pil_img = ImageGrab.grab(bbox=region)
-            except Exception as e:
-                print(f"Screenshot capture failed: {e}")
-                return False, 0.0
-
-        screenshot = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
-        screenshot_gray = cv2.cvtColor(screenshot, cv2.COLOR_BGR2GRAY)
+        screenshot, screenshot_gray, left, top = screen_region_image()
+        h, w = screenshot_gray.shape[:2]
+        right, bottom = left + w, top + h
     except Exception as e:
         print(f"Error capturing screenshot: {e}")
         return None
@@ -474,6 +465,10 @@ def check_region_and_act():
     eq_confident = (eq_template_ok and (eq_letter_confident or eq_super_confident or (not un_candidate or eq_stronger)))
     un_confident = (un_template_ok and (un_letter_confident or un_super_confident or (not eq_candidate or un_stronger)))
 
+    if eq_candidate and eq_confident and not _has_equipped_border(screenshot, best_eq_loc, best_eq_size):
+        print("EQ match rejected: rod has no cyan equipped border.")
+        eq_confident = False
+
     if eq_candidate and eq_confident:
         print(f'EQ detected in region - rod is equipped (score={best_eq_val_scalar:.3f}, UN={best_un_val_scalar:.3f})')
         if eq_letter_score is not None:
@@ -544,7 +539,7 @@ def check_region_and_act():
             post_delay = random.uniform(0.4, 0.8)
             time.sleep(post_delay)
             
-            return True
+            return True if success else None
         
         # Fallback to ultra-stealth if virtual mouse initialization fails
         print("�️ [ULTRA-STEALTH] Using ultimate stealth click for rod clicking")
@@ -568,10 +563,10 @@ def check_region_and_act():
             
             # Wait longer for game to register the click and update UI
             time.sleep(random.uniform(0.4, 0.6))
-            return True
+            return True if success else None
         except Exception as e:
             print(f'❌ Ultimate stealth fallback failed: {e}')
-            return False
+            return None
 
     # Provide additional context when scores are close but conditions failed
     if eq_candidate:

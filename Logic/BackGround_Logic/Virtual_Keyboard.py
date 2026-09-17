@@ -1,6 +1,5 @@
 """
-Virtual Keyboard Driver using Windows API for undetectable keyboard input.
-Uses low-level Windows API calls to simulate hardware keyboard input.
+Keyboard input through Windows SendInput with scan codes.
 """
 import ctypes
 import ctypes.wintypes
@@ -88,36 +87,21 @@ VK_CODES = {
     '^': 0x36, '&': 0x37, '*': 0x38, '(': 0x39, ')': 0x30,
 }
 
-# Windows API structures
-class KEYBDINPUT(ctypes.Structure):
-    _fields_ = [
-        ("wVk", ctypes.wintypes.WORD),
-        ("wScan", ctypes.wintypes.WORD),
-        ("dwFlags", ctypes.wintypes.DWORD),
-        ("time", ctypes.wintypes.DWORD),
-        ("dwExtraInfo", ctypes.POINTER(ctypes.wintypes.ULONG))
-    ]
-
-class INPUT(ctypes.Structure):
-    class _INPUT(ctypes.Union):
-        _fields_ = [("ki", KEYBDINPUT)]
-    
-    _anonymous_ = ("_input",)
-    _fields_ = [
-        ("type", ctypes.wintypes.DWORD),
-        ("_input", _INPUT)
-    ]
+# INPUT must contain the full union, even when only sending a keyboard event.
+try:
+    from .Windows_Input import INPUT, KEYBDINPUT
+except ImportError:
+    from Windows_Input import INPUT, KEYBDINPUT
 
 
 class VirtualKeyboard:
     """
-    Virtual keyboard driver that uses Windows API to create hardware-level keyboard input.
-    Bypasses most detection methods by simulating actual hardware input events.
+    Checked foreground keyboard input using the shared Win32 INPUT layout.
     """
     
     def __init__(self):
         """Initialize the virtual keyboard driver."""
-        self.user32 = ctypes.windll.user32
+        self.user32 = ctypes.WinDLL("user32", use_last_error=True)
         self.kernel32 = ctypes.windll.kernel32
         self._window_manager_resolved = False
         self._window_manager_warning_logged = False
@@ -131,7 +115,7 @@ class VirtualKeyboard:
                 ctypes.c_int
             ]
             self.user32.SendInput.restype = ctypes.wintypes.UINT
-            debug_log(LogCategory.SYSTEM, "Virtual keyboard initialized successfully")
+            debug_log(LogCategory.SYSTEM, "Keyboard backend: Windows SendInput scan codes")
         except Exception as e:
             debug_log(LogCategory.ERROR, f"Warning: Virtual keyboard initialization failed: {e}")
 
@@ -154,62 +138,33 @@ class VirtualKeyboard:
         debug_log(LogCategory.SYSTEM, "🔗 Window Manager linked for stealth keyboard input")
         return True
 
-    def _postmessage_key_event(self, vk_code: int, is_down: bool, key: Optional[Union[str, int]] = None) -> bool:
-        """Attempt to send Roblox key events via PostMessage for stealth typing."""
-        if not WIN32_AVAILABLE:
-            return False
-        if not self._resolve_window_manager() or self._get_hwnd_func is None:
+    def _target_ready(self):
+        if not WIN32_AVAILABLE or not self._resolve_window_manager():
             return False
         hwnd = self._get_hwnd_func()
-        if not hwnd:
-            return False
-        try:
-            scan_code = win32api.MapVirtualKey(vk_code, 0)  # type: ignore
-        except Exception as e:
-            debug_log(LogCategory.ERROR, f"❌ MapVirtualKey failed: {e}")
-            return False
-        repeat_count = 1
-        lparam = repeat_count | (scan_code << 16)
-        if not is_down:
-            lparam |= 0xC0000000  # Release + previous state
-        message = win32con.WM_KEYDOWN if is_down else win32con.WM_KEYUP  # type: ignore
-        try:
-            win32gui.PostMessage(hwnd, message, vk_code, lparam)  # type: ignore
-            phase = "DOWN" if is_down else "UP"
-            debug_log(LogCategory.SYSTEM, f"🎹 [STEALTH-POSTMSG] VK {vk_code} {phase} via PostMessage")
-            # Send WM_CHAR for printable characters on key down to mimic natural input
-            if is_down and isinstance(key, str):
-                char = None
-                if len(key) == 1:
-                    char = key
-                elif key == 'space':
-                    char = ' '
-                if char:
-                    try:
-                        win32gui.PostMessage(hwnd, win32con.WM_CHAR, ord(char), lparam)  # type: ignore
-                        debug_log(LogCategory.SYSTEM, f"🎹 [STEALTH-POSTMSG] WM_CHAR '{char}' dispatched")
-                    except Exception as char_err:
-                        debug_log(LogCategory.DEBUG, f"WM_CHAR dispatch failed: {char_err}")
-            return True
-        except Exception as e:
-            debug_log(LogCategory.ERROR, f"❌ PostMessage key event failed: {e}")
-            return False
-    
+        return bool(hwnd and win32gui.GetForegroundWindow() == hwnd and not win32gui.IsIconic(hwnd))
+
     def _create_keyboard_input(self, vk_code: int, flags: int) -> INPUT:
         """Create a keyboard input structure."""
         input_struct = INPUT()
         input_struct.type = INPUT_KEYBOARD
-        input_struct.ki.wVk = vk_code
-        input_struct.ki.wScan = 0
-        input_struct.ki.dwFlags = flags
+        scan = self.user32.MapVirtualKeyW(vk_code, 4)
+        if not scan:
+            raise ValueError(f"No scan code for key {vk_code}")
+        input_struct.ki.wVk = 0
+        input_struct.ki.wScan = scan & 0xff
+        input_struct.ki.dwFlags = flags | KEYEVENTF_SCANCODE | (1 if scan & 0xff00 == 0xe000 else 0)
         input_struct.ki.time = 0
-        input_struct.ki.dwExtraInfo = None
+        input_struct.ki.dwExtraInfo = 0
         return input_struct
     
     def _send_input(self, input_struct: INPUT) -> bool:
         """Send input to the system."""
         try:
+            ctypes.set_last_error(0)
             result = self.user32.SendInput(1, ctypes.byref(input_struct), ctypes.sizeof(INPUT))
+            if result != 1:
+                debug_log(LogCategory.ERROR, f"Keyboard SendInput failed: accepted {result}/1; error={ctypes.get_last_error()}")
             return result == 1
         except Exception as e:
             debug_log(LogCategory.ERROR, f"Error sending keyboard input: {e}")
@@ -229,9 +184,9 @@ class VirtualKeyboard:
         if vk_code is None:
             debug_log(LogCategory.ERROR, f"Unknown key: {key}")
             return False
-        if self._postmessage_key_event(vk_code, True, key):
-            return True
-        debug_log(LogCategory.DEBUG, f"⚙️ Falling back to SendInput key down for VK {vk_code}")
+        if not self._target_ready():
+            debug_log(LogCategory.ERROR, "Keyboard input skipped: Roblox is not foreground.")
+            return False
         key_input = self._create_keyboard_input(vk_code, KEYEVENTF_KEYDOWN)
         return self._send_input(key_input)
     
@@ -241,41 +196,36 @@ class VirtualKeyboard:
         if vk_code is None:
             debug_log(LogCategory.ERROR, f"Unknown key: {key}")
             return False
-        if self._postmessage_key_event(vk_code, False, key):
-            return True
-        debug_log(LogCategory.DEBUG, f"⚙️ Falling back to SendInput key up for VK {vk_code}")
+
         key_input = self._create_keyboard_input(vk_code, KEYEVENTF_KEYUP)
         return self._send_input(key_input)
     
     def key_press(self, key: Union[str, int], duration: float = 0.05) -> bool:
         """Press and release a key with specified duration."""
-        success = self.key_down(key)
-        if success:
-            time.sleep(duration)
-            success = self.key_up(key)
-        return success
+        if not self.key_down(key):
+            return False
+        try:
+            time.sleep(max(0.03, duration))
+        finally:
+            released = self.key_up(key)
+        return released
     
     def key_combination(self, *keys, duration: float = 0.05) -> bool:
         """Press multiple keys simultaneously (like Ctrl+C)."""
-        # Press all keys down
-        for key in keys:
-            if not self.key_down(key):
-                # If any key fails, release all previously pressed keys
-                for prev_key in keys[:keys.index(key)]:
-                    self.key_up(prev_key)
-                return False
-        
-        # Hold for duration
-        time.sleep(duration)
-        
-        # Release all keys (in reverse order)
-        success = True
-        for key in reversed(keys):
-            if not self.key_up(key):
-                success = False
-        
-        return success
-    
+        pressed = []
+        released = True
+        try:
+            for key in keys:
+                if not self.key_down(key):
+                    return False
+                pressed.append(key)
+            time.sleep(max(0.03, duration))
+        finally:
+            for key in reversed(pressed):
+                if not self.key_up(key):
+                    released = False
+        return released
+
     def type_text(self, text: str, delay: float = 0.05) -> bool:
         """Type text character by character."""
         success = True
@@ -301,11 +251,13 @@ class VirtualKeyboard:
     
     def hold_key(self, key: Union[str, int], duration: float) -> bool:
         """Hold a key down for specified duration."""
-        success = self.key_down(key)
-        if success:
-            time.sleep(duration)
-            success = self.key_up(key)
-        return success
+        if not self.key_down(key):
+            return False
+        try:
+            time.sleep(max(0.03, duration))
+        finally:
+            released = self.key_up(key)
+        return released
     
     def tap_key_multiple(self, key: Union[str, int], count: int, delay: float = 0.1) -> bool:
         """Tap a key multiple times with delay between presses."""

@@ -112,15 +112,12 @@ class RobloxWindowManager:
     
     def get_window_center(self):
         """Get the center coordinates of the Roblox window."""
-        if not self.is_window_valid():
-            if not self.find_roblox_window():
-                return None, None
-        
-        left, top, right, bottom = self.window_rect # type: ignore
-        center_x = (left + right) // 2
-        center_y = (top + bottom) // 2
-        return center_x, center_y
-    
+        region = self.get_window_region()
+        if region is None:
+            return None, None
+        left, top, width, height = region
+        return left + width // 2, top + height // 2
+
     def get_fishing_cast_position(self):
         """Get the position where we should cast the fishing line (center of Roblox window)."""
         center_x, center_y = self.get_window_center()
@@ -138,11 +135,18 @@ class RobloxWindowManager:
             if not self.find_roblox_window():
                 return None
         
-        left, top, right, bottom = self.window_rect # type: ignore
-        width = right - left
-        height = bottom - top
-        return (left, top, width, height)
-    
+        try:
+            if win32gui.IsIconic(self.roblox_hwnd):
+                return None
+            left, top, right, bottom = win32gui.GetClientRect(self.roblox_hwnd)
+            if right <= left or bottom <= top:
+                return None
+            screen_left, screen_top = win32gui.ClientToScreen(self.roblox_hwnd, (left, top))
+            return screen_left, screen_top, right - left, bottom - top
+        except Exception as exc:
+            debug_log(LogCategory.ERROR, f"Cannot read Roblox client area: {exc}")
+            return None
+
     def is_window_valid(self):
         """Check if the current window handle is still valid."""
         current_time = time.time()

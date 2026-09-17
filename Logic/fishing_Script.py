@@ -182,10 +182,8 @@ def _capture_region(region):
 
 
 def CastFishingRod(x, y, hold_seconds=0.93):
-    # Validate Roblox before casting
-    if not (ISROBLOX_OPEN_AVAILABLE and IsRobloxOpen and IsRobloxOpen.validate_roblox_and_game()):
-        return False
-    
+    # The main loop validates the game periodically. Do not run network lookups
+    # between equipping and casting; use the current window/focus checks here.
     # ALWAYS use Roblox window coordinates - no fallbacks to screen center
     if not WINDOW_MANAGER_AVAILABLE:
         return False
@@ -193,116 +191,32 @@ def CastFishingRod(x, y, hold_seconds=0.93):
     if not ensure_roblox_focused():
         return False
     
-    # Get proper Roblox window coordinates
-    target_x, target_y = get_roblox_coordinates()
+    # Honor the caller's aim point; the backend checks it against the live client.
+    target_x, target_y = x, y
     if target_x is None or target_y is None:
         return False
-    
-    # Human-like hold duration with slight variation
-    actual_hold = hold_seconds + random.uniform(-0.1, 0.1)
-    
-    # Use virtual mouse for casting if available
-    if is_virtual_mouse_available():
-        debug_log(LogCategory.CASTING, "🛡️ [ULTRA-STEALTH] Using enhanced hardware-level casting")
-        
-        # Enhanced anti-detection: Larger random offset range
-        cast_offset_x = random.randint(-8, 8)
-        cast_offset_y = random.randint(-8, 8)
-        final_cast_x = target_x + cast_offset_x
-        final_cast_y = target_y + cast_offset_y
-        
-        # Phase 1: Pre-cast natural movement (critical for avoiding detection)
-        # Move to a random position near the target first
-        approach_distance = random.randint(25, 50)
-        approach_angle = random.uniform(0, 2 * 3.14159)
-        approach_x = final_cast_x + int(approach_distance * math.cos(approach_angle))
-        approach_y = final_cast_y + int(approach_distance * math.sin(approach_angle))
-        
-        # Get current mouse position for natural movement
-        current_pos = virtual_mouse.get_cursor_pos()
-        if current_pos:
-            debug_log(LogCategory.CASTING, f"🛡️ [ULTRA-STEALTH] Natural pre-cast movement from ({current_pos[0]}, {current_pos[1]})")
-            # Move naturally to approach position
-            virtual_mouse.human_like_move(current_pos[0], current_pos[1], approach_x, approach_y, 
-                                        random.uniform(0.3, 0.7))
-        else:
-            virtual_mouse.move_to(approach_x, approach_y)
-        
-        # Phase 2: Human hesitation and adjustment
-        hesitation_delay = random.uniform(0.2, 0.5)
-        debug_log(LogCategory.CASTING, f"🛡️ [ULTRA-STEALTH] Human-like hesitation ({hesitation_delay:.2f}s)")
-        time.sleep(hesitation_delay)
-        
-        # Small adjustment movement (like a human fine-tuning position)
-        adjust_x = approach_x + random.randint(-10, 10)
-        adjust_y = approach_y + random.randint(-10, 10)
-        virtual_mouse.move_to(adjust_x, adjust_y)
-        time.sleep(random.uniform(0.1, 0.25))
-        
-        # Phase 3: Final approach to cast position with natural curve
-        debug_log(LogCategory.CASTING, f"🎣 [ULTRA-STEALTH] Natural approach to cast position ({final_cast_x}, {final_cast_y})")
-        virtual_mouse.human_like_move(adjust_x, adjust_y, final_cast_x, final_cast_y, 
-                                    random.uniform(0.2, 0.4))
-        
-        # Phase 4: Pre-cast stabilization (human behavior)
-        stabilize_delay = random.uniform(0.1, 0.3)
-        debug_log(LogCategory.CASTING, f"🛡️ [ULTRA-STEALTH] Pre-cast stabilization ({stabilize_delay:.2f}s)")
-        time.sleep(stabilize_delay)
-        
-        debug_log(LogCategory.CASTING, f"🎣 [ULTRA-STEALTH] Enhanced hardware casting for {actual_hold:.2f}s")
-        
-        # Phase 5: Enhanced casting with variable timing
-        cast_start_delay = random.uniform(0.05, 0.15)  # Human reaction time
-        time.sleep(cast_start_delay)
-        
-        # Use separate mouse_down/mouse_up for proper casting hold with hardware input
-        virtual_mouse.mouse_down(final_cast_x, final_cast_y, 'left')  # Press down
-        time.sleep(actual_hold)  # Hold for the full duration (~0.9s)
-        virtual_mouse.mouse_up(final_cast_x, final_cast_y, 'left')    # Release
-        
-        # Phase 6: Post-cast natural behavior
-        post_cast_delay = random.uniform(0.2, 0.6)
-        debug_log(LogCategory.CASTING, f"🛡️ [ULTRA-STEALTH] Post-cast natural delay ({post_cast_delay:.2f}s)")
-        time.sleep(post_cast_delay)
-        
-        # Optional natural post-cast movement (50% chance)
-        if random.choice([True, False]):
-            post_move_x = final_cast_x + random.randint(-15, 15)
-            post_move_y = final_cast_y + random.randint(-15, 15)
-            virtual_mouse.move_to(post_move_x, post_move_y)
-            debug_log(LogCategory.CASTING, f"🛡️ [ULTRA-STEALTH] Natural post-cast movement to ({post_move_x}, {post_move_y})")
-        
-        debug_log(LogCategory.CASTING, "✅ [ULTRA-STEALTH] Enhanced hardware casting completed")
-        
-    else:
-        # Fallback: Use Windows API directly for mouse control
-        try:
-            import ctypes
-            user32 = ctypes.windll.user32
-            
-            # Add random offset for human-like variation
-            offset_x = random.randint(-3, 3)
-            offset_y = random.randint(-3, 3)
-            final_x = target_x + offset_x
-            final_y = target_y + offset_y
-            
-            # Move to position
-            user32.SetCursorPos(final_x, final_y)
-            time.sleep(0.1)
-            
-            # Mouse down and up (left button)
-            MOUSEEVENTF_LEFTDOWN = 0x0002
-            MOUSEEVENTF_LEFTUP = 0x0004
-            
-            user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-            time.sleep(actual_hold)
-            user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-            
-        except Exception as e:
-            debug_log(LogCategory.ERROR, f"Fallback mouse input failed: {e}")
-            return False
-    
-    return True
+
+    if not is_virtual_mouse_available():
+        debug_log(LogCategory.ERROR, "Mouse input backend unavailable; cannot cast.")
+        return False
+    from BackGround_Logic.Casting_Recovery import has_casting_meter
+    meter_seen = False
+    def observe():
+        nonlocal meter_seen
+        if meter_seen:
+            return
+        region = get_roblox_window_region()
+        if region is None:
+            return
+        frame = screenshot(region=region)
+        if frame is not None:
+            meter_seen = has_casting_meter(cv2.cvtColor(np.array(frame), cv2.COLOR_RGB2BGR))
+    accepted = virtual_mouse.cast_hold(target_x, target_y, max(0.03, hold_seconds), observe=observe)
+    print(f"Casting meter confirmed={meter_seen}")
+    if accepted and not meter_seen:
+        print("Meter not observed: keeping the rod equipped and waiting for a bite before recovery.")
+    return accepted
+
 
 def Zoom_In(x, y, duration=0.05):
     # Simulate pressing 'i' 45 times to zoom in using VirtualKeyboard bypass.
@@ -1422,99 +1336,28 @@ def execute_minigame_action(decision):
 
 
 def initialize_camera_setup():
-    """
-    One-time camera setup for optimal fishing view.
-    Moves mouse to center, adjusts camera angle, and sets zoom level.
-    """
-    print("🎥 [CAMERA SETUP] Initializing optimal fishing camera view...")
-    
-    # Ensure we have virtual mouse available
-    if not is_virtual_mouse_available():
-        print("⚠️ [CAMERA SETUP] Virtual mouse not available, skipping camera setup")
+    """Configure the camera using relative mouse motion and scan-code key input."""
+    if not is_virtual_mouse_available() or not VIRTUAL_KEYBOARD_AVAILABLE or virtual_keyboard is None:
+        print("Camera setup failed: input backend unavailable.")
         return False
-    
-    # Get Roblox window center coordinates
-    target_x, target_y = get_roblox_coordinates()
-    if target_x is None or target_y is None:
-        print("⚠️ [CAMERA SETUP] Could not get Roblox coordinates, skipping camera setup")
+    if not ensure_roblox_focused():
+        print("Camera setup failed: Roblox is not foreground.")
         return False
-    
-    try:
-        # Phase 1: Move to center of screen for camera adjustment
-        print("🎥 [CAMERA SETUP] Moving to screen center for camera adjustment...")
-        center_x, center_y = target_x, target_y  # Use Roblox window center
-        
-        # Natural movement to center
-        current_pos = virtual_mouse.get_cursor_pos()
-        if current_pos:
-            virtual_mouse.human_like_move(current_pos[0], current_pos[1], center_x, center_y, 
-                                        random.uniform(0.5, 0.8))
-        else:
-            virtual_mouse.move_to(center_x, center_y)
-        
-        time.sleep(random.uniform(0.3, 0.5))  # Human-like pause
-        
-        # Phase 2: Right-click and drag down for camera angle
-        print("🎥 [CAMERA SETUP] Adjusting camera angle (right-click drag)...")
-        
-        # Calculate drag end position (600 pixels down)
-        drag_end_x = center_x + random.randint(-20, 20)  # Slight horizontal variation
-        drag_end_y = center_y + 600 + random.randint(-30, 30)  # 600 pixels down with variation
-        
-        # Ensure end position is valid
-        if WINDOW_MANAGER_AVAILABLE:
-            roblox_region = get_roblox_window_region()
-            if roblox_region:
-                max_y = roblox_region[1] + roblox_region[3] - 50  # Window bottom minus margin
-                drag_end_y = min(drag_end_y, max_y)
-        
-        # Enhanced right-click drag for camera adjustment
-        print(f"🎥 [CAMERA SETUP] Dragging from ({center_x}, {center_y}) to ({drag_end_x}, {drag_end_y})")
-        
-        # Right mouse down
-        virtual_mouse.mouse_down(center_x, center_y, 'right')
-        time.sleep(random.uniform(0.1, 0.2))  # Brief hold before drag
-        
-        # Smooth drag movement
-        virtual_mouse.human_like_move(center_x, center_y, drag_end_x, drag_end_y, 
-                                    random.uniform(0.8, 1.2))
-        
-        # Right mouse up
-        virtual_mouse.mouse_up(drag_end_x, drag_end_y, 'right')
-        time.sleep(random.uniform(0.5, 0.8))  # Pause after camera adjustment
-        
-        # Phase 3: Zoom in with 'I' key (45 times at 0.01s intervals)
-        print("🎥 [CAMERA SETUP] Zooming in (pressing 'I' 45 times)...")
-        
-        if VIRTUAL_KEYBOARD_AVAILABLE and virtual_keyboard is not None:
-            for i in range(45):
-                virtual_keyboard.key_press('i', duration=0.005)  # Very short press duration
-                time.sleep(0.01)  # Exact 0.01s interval as requested
-                if i % 15 == 0:  # Progress indicator every 15 presses
-                    print(f"🎥 [CAMERA SETUP] Zoom progress: {i+1}/45")
-        else:
-            print("⚠️ [CAMERA SETUP] Virtual keyboard not available, skipping zoom in")
-        
-        time.sleep(random.uniform(0.3, 0.5))  # Pause between zoom in and out
-        
-        # Phase 4: Zoom out with 'O' key (3 times)
-        print("🎥 [CAMERA SETUP] Fine-tuning zoom (pressing 'O' 3 times)...")
-        
-        if VIRTUAL_KEYBOARD_AVAILABLE and virtual_keyboard is not None:
-            for i in range(3):
-                virtual_keyboard.key_press('o', duration=0.05)  # Normal press duration
-                time.sleep(random.uniform(0.15, 0.25))  # Slightly longer interval for zoom out
-        else:
-            print("⚠️ [CAMERA SETUP] Virtual keyboard not available, skipping zoom out")
-        
-        time.sleep(random.uniform(0.5, 1.0))  # Final pause
-        
-        print("✅ [CAMERA SETUP] Camera initialization completed successfully!")
-        return True
-        
-    except Exception as e:
-        print(f"❌ [CAMERA SETUP] Camera setup failed: {e}")
+    x, y = get_roblox_coordinates()
+    if x is None or y is None:
         return False
+    print("Camera setup: relative right-button drag, then scan-code zoom keys.")
+    if not virtual_mouse.relative_drag(x, y, 0, 450, 'right', duration=0.9):
+        print("Camera setup failed: right-button drag was not sent.")
+        return False
+    for key, count in [('i', 45), ('o', 3)]:
+        for _ in range(count):
+            if not virtual_keyboard.key_press(key, duration=0.04):
+                print(f"Camera setup failed: {key} key input was not sent.")
+                return False
+            time.sleep(0.04)
+    print("Camera input sent; this does not verify the in-game camera position.")
+    return True
 
 
 # Camera initialization flag - ensures camera setup only runs once per script session
@@ -1591,6 +1434,7 @@ def main_fishing_loop():
     fishing_state = "waiting"  # "waiting", "casting", "hooking", "minigame", "reeling"
     cast_attempts = 0
     max_cast_attempts = 3
+    recovery_attempts = 0
     minigame_start_time = 0
     last_rod_click_time = 0  # Track when we last clicked the rod
     rod_click_cooldown = 5.0  # Wait 5 seconds before clicking rod again (prevent spam)
@@ -1607,12 +1451,13 @@ def main_fishing_loop():
                 if ISROBLOX_OPEN_AVAILABLE and IsRobloxOpen and IsRobloxOpen.validate_roblox_and_game():
                     print("🎮 Roblox confirmed active - starting one-time camera setup...")
                     camera_setup_success = initialize_camera_setup()
-                    camera_initialized = True  # Mark as initialized regardless of success to prevent spam
+                    camera_initialized = camera_setup_success
                     
                     if camera_setup_success:
-                        print("✅ Camera setup completed - beginning fishing automation...")
+                        print("Camera input accepted - beginning fishing automation...")
                     else:
-                        print("⚠️ Camera setup had issues - continuing with fishing anyway...")
+                        print("Camera input failed; stopping. Focus Roblox and restart fishing.")
+                        return
                     
                     time.sleep(1.0)  # Brief pause before starting main fishing logic
                 else:
@@ -1643,132 +1488,20 @@ def main_fishing_loop():
                         continue
                 last_validation_time = current_time
             
-            # Check for fishing rod state only when in waiting/equipping state (with cooldown to prevent spam clicking)
-            current_time = time.time()
-            if fishing_state in ["waiting", "equipping"]:
-                if current_time - last_rod_click_time < rod_click_cooldown:
-                    # Still in cooldown period, skip rod detection
-                    time.sleep(0.5)  # Longer delay to prevent spam
-                    rod_result = None
-                else:
-                    rod_result = FishingRodDetector.check_region_and_act()
-                    time.sleep(0.2)  # Brief delay after detection
-            else:
-                # Skip rod detection when casting/hooking/minigame - longer delay
-                rod_result = None
-                time.sleep(0.3)
-            
-            if rod_result is True:  # UN (unequipped) detected and clicked
-                print("🔧 Rod unequipped - attempting to equip...")
-                fishing_state = "equipping"
-                cast_attempts = 0
-                last_rod_click_time = current_time  # Record click time
-                
-                # Give more time for the click to register and rod to equip
-                print("⏳ Waiting for rod to equip...")
-                time.sleep(1.0)  # Initial delay for click to register
-                
-                # Wait for rod to equip with periodic checks
-                equipped = False
-                for wait_check in range(6):  # Check up to 3 seconds total
+            # Observation and actions are separate. Never call the legacy
+            # check_region_and_act() while verifying or waiting for a fish.
+            if fishing_state in ("waiting", "equipping"):
+                if time.time() - last_rod_click_time < rod_click_cooldown:
+                    time.sleep(0.2)
+                    continue
+                last_rod_click_time = time.time()
+                if not FishingRodDetector.ensure_rod_equipped():
+                    print("Rod not confirmed equipped; waiting without extra clicks.")
                     time.sleep(0.5)
-                    # Check if rod is now equipped (without clicking)
-                    temp_result = FishingRodDetector.check_region_and_act()
-                    if temp_result is False:  # EQ detected - rod is equipped
-                        print("✅ Rod successfully equipped!")
-                        equipped = True
-                        break
-                    elif temp_result is None:  # No clear detection
-                        continue
-                    else:  # Still showing UN (unequipped)
-                        continue
-                
-                if not equipped:
-                    print("⚠️ Rod may not have equipped properly, continuing anyway...")
-                    # Reset to waiting state to try again after cooldown
-                    fishing_state = "waiting"
-                
-                # After rod is equipped, center mouse for fishing
-                # Get Roblox window center for mouse positioning
-                if not WINDOW_MANAGER_AVAILABLE:
-                    print("ERROR: Window manager not available - waiting...")
-                    time.sleep(2)
                     continue
-                    
-                center_x, center_y = get_roblox_coordinates()
-                if center_x is None or center_y is None:
-                    print("ERROR: Cannot get Roblox coordinates - waiting...")
-                    time.sleep(2)
-                    continue
-                
-                # Move mouse to center of Roblox window/screen
-                if is_virtual_mouse_available():
-                    virtual_mouse.move_to(center_x, center_y)
-                else:
-                    smooth_move_to(center_x, center_y)
-                
-                time.sleep(0.5)  # Brief pause after mouse movement
-                
-                # Re-check rod status after moving mouse to center to prevent EQ/UN loop
-                print("🔍 Re-checking rod status after centering mouse...")
-                verification_result = FishingRodDetector.check_region_and_act()
-                if verification_result is False:  # EQ confirmed
-                    print("✅ Rod status confirmed: EQ (equipped)")
-                    fishing_state = "casting"
-                elif verification_result is True:  # UN detected again
-                    print("⚠️ Rod reverted to UN after centering - will retry")
-                    fishing_state = "waiting"
-                    last_rod_click_time = current_time - rod_click_cooldown  # Reset cooldown
-                else:
-                    print("❓ Rod status unclear after centering - assuming equipped")
-                    fishing_state = "casting"
-                
-                time.sleep(0.3)  # Additional brief pause before continuing
-                
-            elif rod_result is False:  # EQ (equipped) detected - rod is ready
-                if fishing_state == "waiting" or fishing_state == "equipping":
-                    print("✅ Rod equipped - preparing for casting")
-                    
-                    # Get center coordinates for mouse positioning
-                    center_x, center_y = get_roblox_coordinates()
-                    if center_x is None or center_y is None:
-                        # Fallback to screen center
-                        screen_w, screen_h = get_screen_size()
-                        center_x, center_y = screen_w // 2, screen_h // 2
-                    
-                    # Move mouse to center before switching to casting state
-                    if is_virtual_mouse_available():
-                        virtual_mouse.move_to(center_x, center_y)
-                    else:
-                        smooth_move_to(center_x, center_y)
-                    
-                    time.sleep(0.3)  # Brief pause after mouse movement
-                    
-                    # Re-check rod status after moving mouse to prevent state confusion
-                    verification_result = FishingRodDetector.check_region_and_act()
-                    if verification_result is False:  # EQ still confirmed
-                        print("✅ Rod status verified: EQ (equipped) - switching to casting")
-                        fishing_state = "casting"
-                        cast_attempts = 0
-                    elif verification_result is True:  # UN detected after movement
-                        print("⚠️ Rod became unequipped after mouse movement - resetting")
-                        fishing_state = "waiting"
-                        last_rod_click_time = current_time - rod_click_cooldown  # Reset cooldown
-                    else:
-                        print("❓ Rod status unclear - assuming equipped and proceeding")
-                        fishing_state = "casting"
-                        cast_attempts = 0
-                        
-                    time.sleep(0.2)  # Additional brief pause
-                else:
-                    print(f"🔄 Rod equipped but already in state: {fishing_state}")
-                    pass
-                    
-            elif rod_result is None:  # No clear detection or error
-                # Continue with current state but add small delay
-                print(f"❓ No clear rod detection in state: {fishing_state}")
-                time.sleep(0.2)
-                
+                print("Rod confirmed equipped; casting without further hotbar checks or clicks.")
+                fishing_state = "casting"
+
             if fishing_state == "casting":
                 # Get Roblox window center for casting
                 center_x, center_y = get_roblox_coordinates()
@@ -1778,11 +1511,11 @@ def main_fishing_loop():
                     center_x, center_y = screen_w // 2, screen_h // 2
                 
                 # Cast the rod at center position
-                print(f"🎣 Casting fishing rod at ({center_x}, {center_y - 20})...")
-                cast_success = CastFishingRod(center_x, center_y - 20)
-                
+                print(f"🎣 Casting fishing rod at ({center_x}, {center_y})...")
+                cast_success = CastFishingRod(center_x, center_y)
+
                 if cast_success:
-                    print("✅ Cast successful!")
+                    print("✅ Cast input sent; waiting for a fish to confirm the game responded.")
                     time.sleep(3.0)  # Wait longer for casting animation and minigame to fully disappear
                     
                     print(f"🔎 Entering hooking state - waiting for fish...")
@@ -1790,9 +1523,8 @@ def main_fishing_loop():
                     cast_start_time = time.time()  # Record when we start waiting for fish
                     cast_attempts += 1
                 else:
-                    print("❌ Cast failed! Returning to waiting state...")
-                    fishing_state = "waiting"
-                    time.sleep(2.0)  # Longer delay before retrying
+                    print("Cast input failed. Stopping without toggling the rod; check focus and restart.")
+                    return
                 
             elif fishing_state == "hooking":
                 # Check for 60-second timeout (extended for Roblox update compatibility)
@@ -1801,10 +1533,15 @@ def main_fishing_loop():
                 time_remaining = fishing_timeout - time_waiting
                 
                 if time_waiting >= fishing_timeout:
-                    print(f"⏰ Hooking timeout reached ({fishing_timeout}s), resetting to waiting...")
-                    fishing_state = "waiting"  # This will trigger rod detection and re-equipping
-                    cast_attempts = 0
-                    time.sleep(0.2)  # Brief pause before restarting
+                    if recovery_attempts >= 2:
+                        print("No bite after two rod resets; stopping without more toggles.")
+                        return
+                    print(f"No bite after {fishing_timeout}s; deliberately resetting the rod.")
+                    if not FishingRodDetector.reset_rod():
+                        print("Rod reset not verified; stopping.")
+                        return
+                    recovery_attempts += 1
+                    fishing_state = "casting"
                     continue
                 
 
@@ -1845,11 +1582,6 @@ def main_fishing_loop():
                 # Check shift state
                 Shift_State(0, 0)
                 
-                # Fallback timeout after max cast attempts
-                if cast_attempts >= max_cast_attempts:
-                    fishing_state = "waiting"
-                    cast_attempts = 0
-                
             elif fishing_state == "minigame":
                 print("🎮 Handling fishing minigame (post-click detection)")
                 print("🎣 NOTE: Only detecting minigame AFTER fish click to avoid false positives")
@@ -1873,6 +1605,7 @@ def main_fishing_loop():
                 
                 if minigame_result or timeout_reached:
                     print("Minigame done! Fishing cycle complete, resetting...")
+                    recovery_attempts = 0
                     fishing_state = "waiting"
                     cast_attempts = 0
                     time.sleep(0.2)  # Brief pause before next cycle
